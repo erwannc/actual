@@ -60,12 +60,6 @@ export function TrackingBudgetMenuModal({
     // Adjust based on desired number of buttons per row.
     flexBasis: '100%',
   };
-  const [showMore, setShowMore] = useState(false);
-
-  const onShowMore = () => {
-    setShowMore(!showMore);
-  };
-
   const budgeted = useTrackingSheetValue(
     trackingBudget.catBudgeted(categoryId),
   );

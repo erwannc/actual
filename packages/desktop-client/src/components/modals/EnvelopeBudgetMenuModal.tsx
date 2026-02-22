@@ -54,12 +54,6 @@ export function EnvelopeBudgetMenuModal({
     flexBasis: '100%',
   };
 
-  const [showMore, setShowMore] = useState(false);
-
-  const onShowMore = () => {
-    setShowMore(!showMore);
-  };
-
   const defaultMenuItemStyle: CSSProperties = {
     ...styles.mobileMenuItem,
     color: theme.menuItemText,
