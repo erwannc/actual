@@ -294,8 +294,8 @@ export const ExpenseCategoryMonth = memo(function ExpenseCategoryMonth({
               }}
             >
               <NotesButton
-                id={category.id + month}
-                defaultColor={theme.tableTextLight}
+                id={`${category.id}-${month}`}
+                defaultColor={theme.pageTextLight}
               />
             </View>
             <View

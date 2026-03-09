@@ -67,7 +67,7 @@ export function EnvelopeBudgetMenuModal({
   const { data: category } = useCategory(categoryId);
   const [amountFocused, setAmountFocused] = useState(false);
 
-  const notesId = category ? category.id + month : '';
+  const notesId = category ? `${category.id}-${month}` : '';
   const originalNotes = useNotes(notesId) ?? '';
   const _onUpdateBudget = (amount: number) => {
     onUpdateBudget?.(amountToInteger(amount));
@@ -81,7 +81,7 @@ export function EnvelopeBudgetMenuModal({
 
   const _onEditNotes = () => {
     if (category && month) {
-      onEditNotes?.(category.id + month, month);
+      onEditNotes?.(`${category.id}-${month}`, month);
     }
   };
 
@@ -109,7 +109,6 @@ export function EnvelopeBudgetMenuModal({
             style={{
               justifyContent: 'center',
               alignItems: 'center',
-              marginBottom: 20,
             }}
           >
             <Text

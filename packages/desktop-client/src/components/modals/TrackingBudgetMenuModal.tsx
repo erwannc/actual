@@ -64,7 +64,7 @@ export function TrackingBudgetMenuModal({
     trackingBudget.catBudgeted(categoryId),
   );
   const { data: category } = useCategory(categoryId);
-  const notesId = category ? category.id + month : '';
+  const notesId = category ? `${category.id}-${month}` : '';
   const originalNotes = useNotes(notesId) ?? '';
 
   const [amountFocused, setAmountFocused] = useState(false);
@@ -75,7 +75,7 @@ export function TrackingBudgetMenuModal({
 
   const _onEditNotes = () => {
     if (category && month) {
-      onEditNotes?.(category.id + month, month);
+      onEditNotes?.(`${category.id}-${month}`, month);
     }
   };
 
@@ -109,7 +109,6 @@ export function TrackingBudgetMenuModal({
             style={{
               justifyContent: 'center',
               alignItems: 'center',
-              marginBottom: 20,
             }}
           >
             <Text
