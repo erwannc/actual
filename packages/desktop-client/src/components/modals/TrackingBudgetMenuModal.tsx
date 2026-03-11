@@ -99,11 +99,11 @@ export function TrackingBudgetMenuModal({
 
   return (
     <Modal name="tracking-budget-menu">
-      {({ state: { close } }) => (
+      {({ state }) => (
         <>
           <ModalHeader
             title={<ModalTitle title={category.name} shrinkOnOverflow />}
-            rightContent={<ModalCloseButton onPress={close} />}
+            rightContent={<ModalCloseButton onPress={() => state.close()} />}
           />
           <View
             style={{
@@ -124,7 +124,7 @@ export function TrackingBudgetMenuModal({
               focused={amountFocused}
               onFocus={() => setAmountFocused(true)}
               onBlur={() => setAmountFocused(false)}
-              onEnter={close}
+              onEnter={() => state.close()}
               zeroSign="+"
               focusedStyle={{
                 width: 'auto',
