@@ -6,6 +6,7 @@ import type {
   CustomReportEntity,
   DashboardPageEntity,
   DashboardWidgetEntity,
+  FundsLocationMonthEntity,
 } from 'loot-core/types/models';
 
 import { aqlQuery } from '@desktop-client/queries/aqlQuery';
@@ -53,5 +54,29 @@ export const dashboardQueries = {
         );
         return data;
       },
+    }),
+};
+
+export const fundsLocationQueries = {
+  all: () => ['funds-location'],
+  monthList: () => [...fundsLocationQueries.all(), 'months'],
+  months: () =>
+    queryOptions<string[]>({
+      queryKey: fundsLocationQueries.monthList(),
+      queryFn: async () => {
+        return await send('api/budget-months');
+      },
+    }),
+  month: (month?: string | null) =>
+    queryOptions<FundsLocationMonthEntity>({
+      queryKey: [...fundsLocationQueries.all(), 'month', month],
+      queryFn: async () => {
+        if (!month) {
+          throw new Error('Month is required to load funds location data');
+        }
+
+        return await send('funds-location/get-month', { month });
+      },
+      enabled: !!month,
     }),
 };

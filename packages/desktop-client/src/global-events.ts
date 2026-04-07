@@ -15,6 +15,7 @@ import {
 } from './notifications/notificationsSlice';
 import { payeeQueries } from './payees';
 import { loadPrefs } from './prefs/prefsSlice';
+import { fundsLocationQueries } from './reports';
 import type { AppStore } from './redux/store';
 import * as syncEvents from './sync-events';
 
@@ -79,6 +80,24 @@ export function handleGlobalEvents(store: AppStore, queryClient: QueryClient) {
       promises.push(
         queryClient.invalidateQueries({
           queryKey: accountQueries.lists(),
+        }),
+      );
+    }
+
+    if (
+      tables.includes('accounts') ||
+      tables.includes('categories') ||
+      tables.includes('category_groups') ||
+      tables.includes('category_mapping') ||
+      tables.includes('transactions') ||
+      tables.includes('zero_budgets') ||
+      tables.includes('zero_budget_months') ||
+      tables.includes('prefs') ||
+      tables.includes('funds_location_allocations')
+    ) {
+      promises.push(
+        queryClient.invalidateQueries({
+          queryKey: fundsLocationQueries.all(),
         }),
       );
     }

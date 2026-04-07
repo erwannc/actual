@@ -84,5 +84,15 @@ CREATE TABLE category_mapping
 
 CREATE TABLE messages_clock (id INTEGER PRIMARY KEY, clock TEXT);
 
+CREATE TABLE funds_location_allocations
+  (id TEXT PRIMARY KEY,
+   month TEXT,
+   category_id TEXT,
+   account_id TEXT,
+   amount INTEGER,
+   tombstone INTEGER DEFAULT 0,
+   FOREIGN KEY(category_id) REFERENCES categories(id),
+   FOREIGN KEY(account_id) REFERENCES accounts(id));
+
 CREATE TABLE db_version (version TEXT PRIMARY KEY);
 CREATE TABLE __migrations__ (id INT PRIMARY KEY NOT NULL);

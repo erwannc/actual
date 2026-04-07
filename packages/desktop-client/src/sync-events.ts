@@ -15,6 +15,7 @@ import { addNotification } from './notifications/notificationsSlice';
 import type { Notification } from './notifications/notificationsSlice';
 import { payeeQueries } from './payees';
 import { loadPrefs } from './prefs/prefsSlice';
+import { fundsLocationQueries } from './reports';
 import type { AppStore } from './redux/store';
 import { signOut } from './users/usersSlice';
 
@@ -89,6 +90,22 @@ export function listenForSyncEvent(store: AppStore, queryClient: QueryClient) {
       if (tables.includes('accounts')) {
         void queryClient.invalidateQueries({
           queryKey: accountQueries.lists(),
+        });
+      }
+
+      if (
+        tables.includes('accounts') ||
+        tables.includes('categories') ||
+        tables.includes('category_groups') ||
+        tables.includes('category_mapping') ||
+        tables.includes('transactions') ||
+        tables.includes('zero_budgets') ||
+        tables.includes('zero_budget_months') ||
+        tables.includes('prefs') ||
+        tables.includes('funds_location_allocations')
+      ) {
+        void queryClient.invalidateQueries({
+          queryKey: fundsLocationQueries.all(),
         });
       }
     } else if (event.type === 'error') {

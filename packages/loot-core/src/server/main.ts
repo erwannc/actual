@@ -21,6 +21,7 @@ import * as db from './db';
 import * as encryption from './encryption';
 import { app as encryptionApp } from './encryption/app';
 import { app as filtersApp } from './filters/app';
+import { app as fundsLocationApp } from './funds-location/app';
 import { app } from './main-app';
 import { mutator, runHandler } from './mutators';
 import { app as notesApp } from './notes/app';
@@ -135,6 +136,7 @@ app.combine(
   preferencesApp,
   toolsApp,
   filtersApp,
+  fundsLocationApp,
   reportsApp,
   rulesApp,
   adminApp,

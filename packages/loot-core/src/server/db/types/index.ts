@@ -258,6 +258,15 @@ export type DbDashboard = {
   tombstone: 1 | 0;
 };
 
+export type DbFundsLocationAllocation = {
+  id: string;
+  month: string;
+  category_id: DbCategory['id'];
+  account_id: DbAccount['id'];
+  amount: number;
+  tombstone: 1 | 0;
+};
+
 export type DbViewTransactionInternal = {
   id: DbTransaction['id'];
   is_parent: DbTransaction['isParent'];

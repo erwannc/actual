@@ -32,6 +32,7 @@ import { CashFlowCard } from './reports/CashFlowCard';
 import { CrossoverCard } from './reports/CrossoverCard';
 import { CustomReportListCards } from './reports/CustomReportListCards';
 import { FormulaCard } from './reports/FormulaCard';
+import { FundsLocationLaunchCard } from './reports/FundsLocationLaunchCard';
 import { MarkdownCard } from './reports/MarkdownCard';
 import { NetWorthCard } from './reports/NetWorthCard';
 import { SpendingCard } from './reports/SpendingCard';
@@ -721,6 +722,16 @@ export function Overview({ dashboard }: OverviewProps) {
             innerRef={containerRef}
             style={{ userSelect: 'none', paddingBottom: MOBILE_NAV_HEIGHT }}
           >
+            <View
+              style={{
+                display: 'flex',
+                marginBottom: 20,
+                gap: 20,
+                flexWrap: 'wrap',
+              }}
+            >
+              <FundsLocationLaunchCard />
+            </View>
             {isMounted && (
               <ReactGridLayout
                 width={containerWidth}

@@ -198,6 +198,14 @@ export const schema = {
     meta: f('json'),
     tombstone: f('boolean'),
   },
+  funds_location_allocations: {
+    id: f('id'),
+    month: f('string', { required: true }),
+    category_id: f('id', { ref: 'categories', required: true }),
+    account_id: f('id', { ref: 'accounts', required: true }),
+    amount: f('integer', { required: true }),
+    tombstone: f('boolean'),
+  },
   payee_locations: {
     id: f('id'),
     payee_id: f('id', { ref: 'payees', required: true }),

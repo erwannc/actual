@@ -7,6 +7,7 @@ import { CashFlow } from './reports/CashFlow';
 import { Crossover } from './reports/Crossover';
 import { CustomReport } from './reports/CustomReport';
 import { Formula } from './reports/Formula';
+import { FundsLocation } from './reports/FundsLocation';
 import { NetWorth } from './reports/NetWorth';
 import { Spending } from './reports/Spending';
 import { Summary } from './reports/Summary';
@@ -32,6 +33,7 @@ export function ReportRouter() {
       )}
       <Route path="/cash-flow" element={<CashFlow />} />
       <Route path="/cash-flow/:id" element={<CashFlow />} />
+      <Route path="/funds-location" element={<FundsLocation />} />
       <Route path="/custom" element={<CustomReport />} />
       <Route path="/custom/:id" element={<CustomReport />} />
       <Route path="/spending" element={<Spending />} />
