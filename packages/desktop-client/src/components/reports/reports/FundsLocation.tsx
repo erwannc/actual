@@ -66,6 +66,34 @@ function buildDraftAllocationMap(
   );
 }
 
+async function findCarriedOverDraftAllocationMap({
+  month,
+  allMonths,
+  queryClient,
+}: {
+  month: string;
+  allMonths: string[];
+  queryClient: ReturnType<typeof useQueryClient>;
+}) {
+  const currentMonthIndex = allMonths.indexOf(month);
+  if (currentMonthIndex <= 0) {
+    return {};
+  }
+
+  for (let index = currentMonthIndex - 1; index >= 0; index--) {
+    const priorMonth = allMonths[index];
+    const priorMonthData = await queryClient.ensureQueryData(
+      fundsLocationQueries.month(priorMonth),
+    );
+
+    if (priorMonthData.allocations.length > 0) {
+      return buildDraftAllocationMap(priorMonthData.allocations);
+    }
+  }
+
+  return {};
+}
+
 function serializeDraftAllocationMap(draftAllocations: DraftAllocationMap) {
   return JSON.stringify(
     Object.values(draftAllocations)
@@ -251,12 +279,33 @@ export function FundsLocation() {
   const monthData = fundsLocationQuery.data;
 
   useEffect(() => {
-    if (!monthData) {
+    if (!monthData || !resolvedMonth) {
       return;
     }
 
-    setDraftAllocations(buildDraftAllocationMap(monthData.allocations));
-  }, [monthData]);
+    let isCancelled = false;
+
+    async function syncDraftAllocations() {
+      const nextDraftAllocations =
+        monthData.allocations.length > 0 || !allMonths
+          ? buildDraftAllocationMap(monthData.allocations)
+          : await findCarriedOverDraftAllocationMap({
+              month: resolvedMonth,
+              allMonths,
+              queryClient,
+            });
+
+      if (!isCancelled) {
+        setDraftAllocations(nextDraftAllocations);
+      }
+    }
+
+    void syncDraftAllocations();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [allMonths, monthData, queryClient, resolvedMonth]);
 
   const displayData = useMemo(() => {
     if (!monthData) {

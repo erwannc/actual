@@ -205,7 +205,7 @@ describe('FundsLocation', () => {
         { categoryId: 'food', accountId: 'checking', amount: 3000 },
         { categoryId: 'utilities', accountId: 'savings', amount: 1200 },
       ],
-      '2019-03': [{ categoryId: 'food', accountId: 'checking', amount: 500 }],
+      '2019-03': [],
     };
 
     setupMockServer();
@@ -266,7 +266,7 @@ describe('FundsLocation', () => {
     expect(utilitiesSavingsSlider).toHaveAttribute('max', '5000');
   });
 
-  test('switching months loads the matching snapshot', async () => {
+  test('switching months carries over the latest saved snapshot', async () => {
     renderFundsLocation();
 
     expect(
@@ -277,8 +277,11 @@ describe('FundsLocation', () => {
 
     await waitFor(() => {
       expect(screen.getByLabelText('Food allocation in Checking')).toHaveValue(
-        '500',
+        '3000',
       );
+      expect(
+        screen.getByLabelText('Utilities allocation in Savings'),
+      ).toHaveValue('1200');
     });
   });
 
