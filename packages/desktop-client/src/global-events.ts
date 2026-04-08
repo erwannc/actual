@@ -93,7 +93,8 @@ export function handleGlobalEvents(store: AppStore, queryClient: QueryClient) {
       tables.includes('zero_budgets') ||
       tables.includes('zero_budget_months') ||
       tables.includes('prefs') ||
-      tables.includes('funds_location_allocations')
+      tables.includes('funds_location_allocations') ||
+      tables.includes('funds_location_months')
     ) {
       promises.push(
         queryClient.invalidateQueries({

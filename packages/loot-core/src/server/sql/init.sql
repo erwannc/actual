@@ -94,5 +94,10 @@ CREATE TABLE funds_location_allocations
    FOREIGN KEY(category_id) REFERENCES categories(id),
    FOREIGN KEY(account_id) REFERENCES accounts(id));
 
+CREATE TABLE funds_location_months
+  (id TEXT PRIMARY KEY,
+   has_snapshot INTEGER DEFAULT 1,
+   tombstone INTEGER DEFAULT 0);
+
 CREATE TABLE db_version (version TEXT PRIMARY KEY);
 CREATE TABLE __migrations__ (id INT PRIMARY KEY NOT NULL);

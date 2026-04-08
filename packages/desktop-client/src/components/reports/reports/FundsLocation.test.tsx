@@ -207,12 +207,17 @@ const BASE_CATEGORIES = [
 
 let currentAccounts = BASE_ACCOUNTS;
 let currentCategories = BASE_CATEGORIES;
+let monthAccountOverrides: Partial<Record<string, typeof BASE_ACCOUNTS>> = {};
+let monthCategoryOverrides: Partial<Record<string, typeof BASE_CATEGORIES>> = {};
 let savedAllocations: Record<string, FundsLocationAllocationInput[]> = {};
+let savedSnapshots: Record<string, boolean> = {};
 let trackingBudget = false;
 
 function useBaseFixture() {
   currentAccounts = BASE_ACCOUNTS;
   currentCategories = BASE_CATEGORIES;
+  monthAccountOverrides = {};
+  monthCategoryOverrides = {};
   savedAllocations = {
     '2019-02': [
       { categoryId: 'food', accountId: 'checking', amount: 3000 },
@@ -220,11 +225,17 @@ function useBaseFixture() {
     ],
     '2019-03': [],
   };
+  savedSnapshots = {
+    '2019-02': true,
+    '2019-03': false,
+  };
 }
 
 function useHighAccountFixture() {
   currentAccounts = HIGH_ACCOUNT_ACCOUNTS;
   currentCategories = BASE_CATEGORIES;
+  monthAccountOverrides = {};
+  monthCategoryOverrides = {};
   savedAllocations = {
     '2019-02': [
       { categoryId: 'food', accountId: 'account-1', amount: 3000 },
@@ -235,6 +246,22 @@ function useHighAccountFixture() {
     ],
     '2019-03': [],
   };
+  savedSnapshots = {
+    '2019-02': true,
+    '2019-03': false,
+  };
+}
+
+function useFilteredCarryOverFixture() {
+  useBaseFixture();
+  monthCategoryOverrides = {
+    '2019-03': BASE_CATEGORIES.filter(category => category.id !== 'utilities'),
+  };
+  monthAccountOverrides = {
+    '2019-03': BASE_ACCOUNTS.map(account =>
+      account.id === 'savings' ? { ...account, balance: 0, isEditable: false } : account,
+    ),
+  };
 }
 
 function buildMonthData(month: string): FundsLocationMonthEntity {
@@ -243,6 +270,7 @@ function buildMonthData(month: string): FundsLocationMonthEntity {
       month,
       budgetType: 'tracking',
       supported: false,
+      hasSavedSnapshot: false,
       editableAccounts: [],
       readOnlyAccounts: [],
       categories: [],
@@ -258,6 +286,8 @@ function buildMonthData(month: string): FundsLocationMonthEntity {
     };
   }
 
+  const accounts = monthAccountOverrides[month] ?? currentAccounts;
+  const categories = monthCategoryOverrides[month] ?? currentCategories;
   const allocations = (savedAllocations[month] ?? []).map(allocation => ({
     id: `${month}-${allocation.categoryId}-${allocation.accountId}`,
     month,
@@ -266,8 +296,8 @@ function buildMonthData(month: string): FundsLocationMonthEntity {
     amount: allocation.amount,
   }));
   const derived = deriveFundsLocationData({
-    accounts: currentAccounts,
-    categories: currentCategories,
+    accounts,
+    categories,
     allocations,
   });
 
@@ -275,6 +305,7 @@ function buildMonthData(month: string): FundsLocationMonthEntity {
     month,
     budgetType: 'envelope',
     supported: true,
+    hasSavedSnapshot: savedSnapshots[month] ?? allocations.length > 0,
     editableAccounts: derived.accounts.filter(account => account.isEditable),
     readOnlyAccounts: derived.accounts.filter(account => !account.isEditable),
     categories: derived.categories,
@@ -305,6 +336,7 @@ function setupMockServer() {
       month: string;
       allocations: FundsLocationAllocationInput[];
     }) => {
+      savedSnapshots[month] = true;
       savedAllocations[month] = allocations.filter(
         allocation => allocation.amount !== 0,
       );
@@ -483,6 +515,85 @@ describe('FundsLocation', () => {
       );
     });
     expect(savedAllocations['2019-02']).toEqual([]);
+  });
+
+  test('clearing a later saved month keeps that month empty when revisiting it', async () => {
+    renderFundsLocation();
+
+    expect(
+      await screen.findByLabelText('Food allocation in Checking'),
+    ).toHaveValue('3000');
+
+    fireEvent.click(screen.getByRole('button', { name: '2019-03' }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Food allocation in Checking')).toHaveValue(
+        '3000',
+      );
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save allocations' }));
+
+    await waitFor(() => {
+      expect(savedAllocations['2019-03']).toEqual(
+        expect.arrayContaining([
+          { categoryId: 'food', accountId: 'checking', amount: 3000 },
+          { categoryId: 'utilities', accountId: 'savings', amount: 1200 },
+        ]),
+      );
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear saved month' }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Food allocation in Checking')).toHaveValue(
+        '0',
+      );
+      expect(
+        screen.getByLabelText('Utilities allocation in Savings'),
+      ).toHaveValue('0');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '2019-02' }));
+    await screen.findByLabelText('Food allocation in Checking');
+    fireEvent.click(screen.getByRole('button', { name: '2019-03' }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Food allocation in Checking')).toHaveValue(
+        '0',
+      );
+      expect(
+        screen.getByLabelText('Utilities allocation in Savings'),
+      ).toHaveValue('0');
+    });
+  });
+
+  test('carry-over filters out accounts and categories that are not valid this month', async () => {
+    useFilteredCarryOverFixture();
+    setupMockServer();
+
+    renderFundsLocation();
+
+    await screen.findByTestId('funds-location-table');
+
+    fireEvent.click(screen.getByRole('button', { name: '2019-03' }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Food allocation in Checking')).toHaveValue(
+        '3000',
+      );
+    });
+
+    expect(screen.queryByText('Utilities')).not.toBeInTheDocument();
+    expect(screen.queryByText('Savings')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save allocations' }));
+
+    await waitFor(() => {
+      expect(savedAllocations['2019-03']).toEqual([
+        { categoryId: 'food', accountId: 'checking', amount: 3000 },
+      ]);
+    });
   });
 
   test('renders compact mode summary and actions when there are more than 6 editable accounts', async () => {

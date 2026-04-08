@@ -206,6 +206,11 @@ export const schema = {
     amount: f('integer', { required: true }),
     tombstone: f('boolean'),
   },
+  funds_location_months: {
+    id: f('id'),
+    has_snapshot: f('boolean', { default: true }),
+    tombstone: f('boolean'),
+  },
   payee_locations: {
     id: f('id'),
     payee_id: f('id', { ref: 'payees', required: true }),

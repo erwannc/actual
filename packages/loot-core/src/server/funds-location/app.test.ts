@@ -148,15 +148,19 @@ describe('funds location app', () => {
   test('load-budget migrates the funds location table without losing budget data', async () => {
     await loadTestBudget();
 
-    const table = await db.first<{ name: string }>(
+    const allocationsTable = await db.first<{ name: string }>(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'funds_location_allocations'",
+    );
+    const monthsTable = await db.first<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'funds_location_months'",
     );
     const accountCount = await db.first<{ count: number }>(
       'SELECT COUNT(*) AS count FROM accounts WHERE tombstone = 0',
     );
     const months = await runHandler(handlers['api/budget-months']);
 
-    expect(table?.name).toBe('funds_location_allocations');
+    expect(allocationsTable?.name).toBe('funds_location_allocations');
+    expect(monthsTable?.name).toBe('funds_location_months');
     expect(accountCount?.count).toBeGreaterThan(0);
     expect(months).toContain(MONTH);
   });
@@ -169,6 +173,7 @@ describe('funds location app', () => {
     });
 
     expect(result.supported).toBe(true);
+    expect(result.hasSavedSnapshot).toBe(false);
     expect(
       result.categories.map(category => ({
         id: category.id,
@@ -317,6 +322,7 @@ describe('funds location app', () => {
         }),
       ]),
     );
+    expect(saved.hasSavedSnapshot).toBe(true);
   });
 
   test('save-month only accepts currently editable categories and accounts', async () => {
@@ -347,5 +353,29 @@ describe('funds location app', () => {
         ],
       }),
     ).rejects.toThrow('Unknown funds location account');
+  });
+
+  test('save-month persists an explicitly cleared snapshot', async () => {
+    await setupFundsLocationScenario();
+
+    const saved = await runHandler(handlers['funds-location/save-month'], {
+      month: MONTH,
+      allocations: [],
+    });
+    const storedMonth = await db.first<{ id: string }>(
+      `SELECT id
+       FROM funds_location_months
+       WHERE id = ? AND tombstone = 0`,
+      [MONTH],
+    );
+    const reloaded = await runHandler(handlers['funds-location/get-month'], {
+      month: MONTH,
+    });
+
+    expect(saved.hasSavedSnapshot).toBe(true);
+    expect(saved.allocations).toEqual([]);
+    expect(storedMonth?.id).toBe(MONTH);
+    expect(reloaded.hasSavedSnapshot).toBe(true);
+    expect(reloaded.allocations).toEqual([]);
   });
 });

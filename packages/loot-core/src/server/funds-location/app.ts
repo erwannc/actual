@@ -7,6 +7,7 @@ import type {
   FundsLocationAllocationEntity,
   FundsLocationAllocationInput,
   FundsLocationMonthEntity,
+  FundsLocationSavedMonthEntity,
 } from '../../types/models';
 import { createApp } from '../app';
 import { aqlQuery } from '../aql';
@@ -77,6 +78,44 @@ async function getStoredAllocations(
   return data;
 }
 
+async function getStoredMonth(month: string): Promise<FundsLocationSavedMonthEntity | null> {
+  return await db.first<FundsLocationSavedMonthEntity>(
+    `SELECT id, has_snapshot, tombstone
+     FROM funds_location_months
+     WHERE id = ? AND tombstone = 0`,
+    [month],
+  );
+}
+
+async function ensureStoredMonth(month: string) {
+  const existingMonth = await db.first<{
+    id: string;
+    has_snapshot: 1 | 0;
+    tombstone: 1 | 0;
+  }>(
+    `SELECT id, has_snapshot, tombstone
+     FROM funds_location_months
+     WHERE id = ?`,
+    [month],
+  );
+
+  if (!existingMonth) {
+    await db.insertWithSchema('funds_location_months', {
+      id: month,
+      has_snapshot: true,
+    });
+    return;
+  }
+
+  if (existingMonth.tombstone) {
+    await db.updateWithSchema('funds_location_months', {
+      id: month,
+      has_snapshot: true,
+      tombstone: false,
+    });
+  }
+}
+
 async function getMonth({
   month,
 }: {
@@ -90,6 +129,7 @@ async function getMonth({
       month,
       budgetType,
       supported: false,
+      hasSavedSnapshot: false,
       editableAccounts: [],
       readOnlyAccounts: [],
       categories: [],
@@ -148,7 +188,9 @@ async function getMonth({
       .map(account => account.id),
   );
   const categoryIds = new Set(categories.map(category => category.id));
-  const allocations = (await getStoredAllocations(month)).filter(
+  const storedAllocations = await getStoredAllocations(month);
+  const storedMonth = await getStoredMonth(month);
+  const allocations = storedAllocations.filter(
     allocation =>
       categoryIds.has(allocation.category_id) &&
       editableAccountIds.has(allocation.account_id),
@@ -163,6 +205,7 @@ async function getMonth({
     month,
     budgetType,
     supported: true,
+    hasSavedSnapshot: storedMonth !== null || storedAllocations.length > 0,
     editableAccounts: derived.accounts.filter(account => account.isEditable),
     readOnlyAccounts: derived.accounts.filter(account => !account.isEditable),
     categories: derived.categories,
@@ -212,6 +255,8 @@ async function saveMonth({
       amount: (existing?.amount ?? 0) + allocation.amount,
     });
   }
+
+  await ensureStoredMonth(month);
 
   const existingAllocations = await getStoredAllocations(month);
   await Promise.all(

@@ -96,6 +96,7 @@ describe('FundsLocationCard', () => {
       month: '2019-02',
       budgetType: 'envelope',
       supported: true,
+      hasSavedSnapshot: true,
       editableAccounts: [],
       readOnlyAccounts: [],
       categories: [],
@@ -117,8 +118,8 @@ describe('FundsLocationCard', () => {
 
     renderCard();
 
-    expect(await screen.findByText('February 2019')).toBeInTheDocument();
-    expect(screen.getByText('Allocated funds')).toBeInTheDocument();
+    expect(await screen.findByText('Allocated funds')).toBeInTheDocument();
+    expect(screen.getByText('February 2019')).toBeInTheDocument();
     expect(screen.getByText('7000')).toBeInTheDocument();
     expect(screen.getByText('70%')).toBeInTheDocument();
     expect(screen.getByText('Non-allocated funds')).toBeInTheDocument();
@@ -131,6 +132,7 @@ describe('FundsLocationCard', () => {
       month: '2019-02',
       budgetType: 'tracking',
       supported: false,
+      hasSavedSnapshot: false,
       editableAccounts: [],
       readOnlyAccounts: [],
       categories: [],

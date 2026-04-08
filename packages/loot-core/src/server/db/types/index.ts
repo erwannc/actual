@@ -267,6 +267,12 @@ export type DbFundsLocationAllocation = {
   tombstone: 1 | 0;
 };
 
+export type DbFundsLocationMonth = {
+  id: string;
+  has_snapshot: 1 | 0;
+  tombstone: 1 | 0;
+};
+
 export type DbViewTransactionInternal = {
   id: DbTransaction['id'];
   is_parent: DbTransaction['isParent'];

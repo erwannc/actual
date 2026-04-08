@@ -111,10 +111,14 @@ async function findCarriedOverDraftAllocationMap({
   month,
   allMonths,
   queryClient,
+  validCategoryIds,
+  validEditableAccountIds,
 }: {
   month: string;
   allMonths: string[];
   queryClient: ReturnType<typeof useQueryClient>;
+  validCategoryIds: Set<string>;
+  validEditableAccountIds: Set<string>;
 }) {
   const currentMonthIndex = allMonths.indexOf(month);
   if (currentMonthIndex <= 0) {
@@ -127,9 +131,17 @@ async function findCarriedOverDraftAllocationMap({
       fundsLocationQueries.month(priorMonth),
     );
 
-    if (priorMonthData.allocations.length > 0) {
-      return buildDraftAllocationMap(priorMonthData.allocations);
+    if (!priorMonthData.hasSavedSnapshot) {
+      continue;
     }
+
+    return buildDraftAllocationMap(
+      priorMonthData.allocations.filter(
+        allocation =>
+          validCategoryIds.has(allocation.category_id) &&
+          validEditableAccountIds.has(allocation.account_id),
+      ),
+    );
   }
 
   return {};
@@ -481,16 +493,26 @@ export function FundsLocation() {
       return;
     }
 
+    const currentMonthData = monthData;
+    const month = resolvedMonth;
     let isCancelled = false;
 
     async function syncDraftAllocations() {
+      const validCategoryIds = new Set(
+        currentMonthData.categories.map(category => category.id),
+      );
+      const validEditableAccountIds = new Set(
+        currentMonthData.editableAccounts.map(account => account.id),
+      );
       const nextDraftAllocations =
-        monthData.allocations.length > 0 || !allMonths
-          ? buildDraftAllocationMap(monthData.allocations)
+        currentMonthData.hasSavedSnapshot || !allMonths
+          ? buildDraftAllocationMap(currentMonthData.allocations)
           : await findCarriedOverDraftAllocationMap({
-              month: resolvedMonth,
+              month,
               allMonths,
               queryClient,
+              validCategoryIds,
+              validEditableAccountIds,
             });
 
       if (!isCancelled) {
@@ -684,8 +706,16 @@ export function FundsLocation() {
       });
   }, [categoryFilter, categoryRows, groupFilter, reportSort]);
 
-  const saveMutation = useMutation({
+  const saveMutation = useMutation<
+    FundsLocationMonthEntity,
+    Error,
+    FundsLocationAllocationInput[]
+  >({
     mutationFn: async (allocations: FundsLocationAllocationInput[]) => {
+      if (!resolvedMonth) {
+        throw new Error('Month is required to save funds location data');
+      }
+
       return await send('funds-location/save-month', {
         month: resolvedMonth,
         allocations,
@@ -693,7 +723,7 @@ export function FundsLocation() {
     },
     onSuccess: async data => {
       queryClient.setQueryData(
-        fundsLocationQueries.month(resolvedMonth).queryKey,
+        fundsLocationQueries.month(data.month).queryKey,
         data,
       );
       await queryClient.invalidateQueries({
@@ -1138,9 +1168,11 @@ export function FundsLocation() {
     );
   };
 
-  if (isMonthsPending || fundsLocationQuery.isPending || !displayData) {
+  if (isMonthsPending || fundsLocationQuery.isPending || !displayData || !monthData) {
     return <LoadingIndicator message={t('Loading funds location...')} />;
   }
+
+  const currentMonthData = monthData;
 
   const header = isNarrowWidth ? (
     <MobilePageHeader
@@ -1211,7 +1243,9 @@ export function FundsLocation() {
             >
               <Button
                 isDisabled={
-                  saveMutation.isPending || monthData.allocations.length === 0
+                  saveMutation.isPending ||
+                  !currentMonthData.hasSavedSnapshot ||
+                  currentMonthData.allocations.length === 0
                 }
                 onPress={() => saveMutation.mutate([])}
               >

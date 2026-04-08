@@ -13,6 +13,12 @@ export type FundsLocationAllocationInput = {
   amount: number;
 };
 
+export type FundsLocationSavedMonthEntity = {
+  id: string;
+  has_snapshot?: boolean;
+  tombstone?: boolean;
+};
+
 export type FundsLocationAccountSummary = {
   id: string;
   name: string;
@@ -49,6 +55,7 @@ export type FundsLocationMonthEntity = {
   month: string;
   budgetType: 'envelope' | 'tracking';
   supported: boolean;
+  hasSavedSnapshot: boolean;
   editableAccounts: FundsLocationAccountSummary[];
   readOnlyAccounts: FundsLocationAccountSummary[];
   categories: FundsLocationCategorySummary[];
