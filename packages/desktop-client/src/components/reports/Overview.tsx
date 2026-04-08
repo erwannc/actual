@@ -32,7 +32,7 @@ import { CashFlowCard } from './reports/CashFlowCard';
 import { CrossoverCard } from './reports/CrossoverCard';
 import { CustomReportListCards } from './reports/CustomReportListCards';
 import { FormulaCard } from './reports/FormulaCard';
-import { FundsLocationLaunchCard } from './reports/FundsLocationLaunchCard';
+import { FundsLocationCard } from './reports/FundsLocationCard';
 import { MarkdownCard } from './reports/MarkdownCard';
 import { NetWorthCard } from './reports/NetWorthCard';
 import { SpendingCard } from './reports/SpendingCard';
@@ -598,6 +598,10 @@ export function Overview({ dashboard }: OverviewProps) {
                               text: t('Summary card'),
                             },
                             {
+                              name: 'funds-location-card' as const,
+                              text: t('Funds location'),
+                            },
+                            {
                               name: 'calendar-card' as const,
                               text: t('Calendar card'),
                             },
@@ -722,16 +726,6 @@ export function Overview({ dashboard }: OverviewProps) {
             innerRef={containerRef}
             style={{ userSelect: 'none', paddingBottom: MOBILE_NAV_HEIGHT }}
           >
-            <View
-              style={{
-                display: 'flex',
-                marginBottom: 20,
-                gap: 20,
-                flexWrap: 'wrap',
-              }}
-            >
-              <FundsLocationLaunchCard />
-            </View>
             {isMounted && (
               <ReactGridLayout
                 width={containerWidth}
@@ -840,6 +834,17 @@ export function Overview({ dashboard }: OverviewProps) {
                         />
                       ) : widget.type === 'summary-card' ? (
                         <SummaryCard
+                          widgetId={item.i}
+                          isEditing={isEditing}
+                          meta={widget.meta}
+                          onMetaChange={newMeta => onMetaChange(item, newMeta)}
+                          onRemove={() => onRemoveWidget(item.i)}
+                          onCopy={targetDashboardId =>
+                            onCopyWidget(item.i, targetDashboardId)
+                          }
+                        />
+                      ) : widget.type === 'funds-location-card' ? (
+                        <FundsLocationCard
                           widgetId={item.i}
                           isEditing={isEditing}
                           meta={widget.meta}

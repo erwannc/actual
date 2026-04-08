@@ -36,11 +36,24 @@ function isWidgetType(type: string): type is DashboardWidgetEntity['type'] {
     'crossover-card',
     'budget-analysis-card',
     'markdown-card',
+    'funds-location-card',
     'summary-card',
     'calendar-card',
     'formula-card',
     'custom-report',
   ].includes(type);
+}
+
+function isDashboardWidgetEntity(value: unknown): value is DashboardWidgetEntity {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'id' in value &&
+    typeof value.id === 'string' &&
+    'type' in value &&
+    typeof value.type === 'string' &&
+    isWidgetType(value.type)
+  );
 }
 
 const exportModel = {
@@ -143,7 +156,9 @@ async function updateDashboard(
       .select('*'),
   );
   const dbWidgetMap = new Map(
-    (dbWidgets as DashboardWidgetEntity[]).map(widget => [widget.id, widget]),
+    dbWidgets
+      .filter(isDashboardWidgetEntity)
+      .map(widget => [widget.id, widget]),
   );
 
   await Promise.all(

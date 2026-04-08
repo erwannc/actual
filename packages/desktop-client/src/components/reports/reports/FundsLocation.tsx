@@ -1338,6 +1338,7 @@ export function FundsLocation() {
               <View
                 style={{
                   gap: 12,
+                  paddingTop: 8,
                   flexDirection: isNarrowWidth ? 'column' : 'row',
                   alignItems: isNarrowWidth ? 'stretch' : 'flex-end',
                 }}
@@ -1346,7 +1347,7 @@ export function FundsLocation() {
                   style={{
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: 6,
+                    gap: 4,
                     minWidth: isNarrowWidth ? undefined : 220,
                   }}
                 >

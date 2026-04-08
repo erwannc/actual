@@ -104,6 +104,12 @@ export type MarkdownWidget = AbstractWidget<
   'markdown-card',
   { content: string; text_align?: 'left' | 'right' | 'center' }
 >;
+export type FundsLocationWidget = AbstractWidget<
+  'funds-location-card',
+  {
+    name?: string;
+  } | null
+>;
 
 type SpecializedWidget =
   | NetWorthWidget
@@ -112,6 +118,7 @@ type SpecializedWidget =
   | BudgetAnalysisWidget
   | CrossoverWidget
   | MarkdownWidget
+  | FundsLocationWidget
   | SummaryWidget
   | CalendarWidget
   | FormulaWidget;
