@@ -23,6 +23,13 @@ import type {
 } from 'loot-core/types/models';
 
 import { MonthPicker } from '@desktop-client/components/budget/MonthPicker';
+import {
+  Modal,
+  ModalButtons,
+  ModalCloseButton,
+  ModalHeader,
+} from '@desktop-client/components/common/Modal';
+import { Search } from '@desktop-client/components/common/Search';
 import { FinancialText } from '@desktop-client/components/FinancialText';
 import { MobileBackButton } from '@desktop-client/components/mobile/MobileBackButton';
 import {
@@ -46,6 +53,40 @@ const COLUMN_WIDTHS = {
   allocated: 130,
   remainder: 130,
   account: 160,
+};
+const HIGH_ACCOUNT_COUNT_THRESHOLD = 6;
+const ACCOUNT_SEARCH_THRESHOLD = 10;
+
+type ReportSortColumn =
+  | 'default'
+  | 'group'
+  | 'category'
+  | 'balance'
+  | 'allocated'
+  | 'remainder'
+  | 'summary'
+  | 'account';
+type ReportSortDirection = 'asc' | 'desc';
+type DialogSortColumn =
+  | 'default'
+  | 'account'
+  | 'balance'
+  | 'currentAllocation'
+  | 'maxAvailable'
+  | 'allocation';
+type DialogSortDirection = 'asc' | 'desc';
+
+type CategoryDialogState = {
+  categoryId: string;
+  allocations: Record<string, number>;
+  defaultOrder: string[];
+  sortColumn: DialogSortColumn;
+  sortDirection: DialogSortDirection;
+};
+type ReportSortState = {
+  column: ReportSortColumn;
+  direction: ReportSortDirection;
+  accountId?: string;
 };
 
 function buildDraftAllocationMap(
@@ -195,11 +236,13 @@ function AllocationSlider({
   value,
   maxValue,
   onUpdate,
+  showSummary = true,
 }: {
   label: string;
   value: number;
   maxValue: number;
   onUpdate: (value: number) => void;
+  showSummary?: boolean;
 }) {
   const { t } = useTranslation();
   const format = useFormat();
@@ -220,25 +263,171 @@ function AllocationSlider({
           accentColor: theme.buttonPrimaryBackground,
         }}
       />
-      <View
-        style={{
-          gap: 8,
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
-        <FinancialText style={styles.tnum}>
-          {format(value, 'financial')}
-        </FinancialText>
-        <Text style={{ ...styles.smallText, color: theme.pageTextSubdued }}>
-          {t('Max: {{amount}}', {
-            amount: format(maxValue, 'financial'),
-          })}
-        </Text>
-      </View>
+      {showSummary ? (
+        <View
+          style={{
+            gap: 8,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <FinancialText style={styles.tnum}>
+            {format(value, 'financial')}
+          </FinancialText>
+          <Text style={{ ...styles.smallText, color: theme.pageTextSubdued }}>
+            {t('Max: {{amount}}', {
+              amount: format(maxValue, 'financial'),
+            })}
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
+}
+
+function getDraftAllocationAmount(
+  draftAllocations: DraftAllocationMap,
+  categoryId: string,
+  accountId: string,
+) {
+  return (
+    draftAllocations[getFundsLocationAllocationKey(categoryId, accountId)]
+      ?.amount ?? 0
+  );
+}
+
+function getCategoryDialogDraftAllocations(
+  categoryId: string,
+  accountIds: string[],
+  draftAllocations: DraftAllocationMap,
+) {
+  return Object.fromEntries(
+    accountIds.map(accountId => [
+      accountId,
+      getDraftAllocationAmount(draftAllocations, categoryId, accountId),
+    ]),
+  );
+}
+
+function replaceCategoryDraftAllocations({
+  draftAllocations,
+  categoryId,
+  accountAllocations,
+}: {
+  draftAllocations: DraftAllocationMap;
+  categoryId: string;
+  accountAllocations: Record<string, number>;
+}) {
+  const nextDraftAllocations = Object.fromEntries(
+    Object.entries(draftAllocations).filter(
+      ([, allocation]) => allocation.categoryId !== categoryId,
+    ),
+  ) as DraftAllocationMap;
+
+  for (const [accountId, amount] of Object.entries(accountAllocations)) {
+    if (amount === 0) {
+      continue;
+    }
+
+    nextDraftAllocations[getFundsLocationAllocationKey(categoryId, accountId)] =
+      {
+        categoryId,
+        accountId,
+        amount,
+      };
+  }
+
+  return nextDraftAllocations;
+}
+
+function getCategorySummaryAllocations({
+  categoryId,
+  editableAccounts,
+  draftAllocations,
+}: {
+  categoryId: string;
+  editableAccounts: Array<{ id: string; name: string }>;
+  draftAllocations: DraftAllocationMap;
+}) {
+  return editableAccounts
+    .map(account => ({
+      accountId: account.id,
+      accountName: account.name,
+      amount: getDraftAllocationAmount(
+        draftAllocations,
+        categoryId,
+        account.id,
+      ),
+    }))
+    .filter(allocation => allocation.amount > 0)
+    .sort((left, right) => {
+      if (right.amount !== left.amount) {
+        return right.amount - left.amount;
+      }
+
+      return left.accountName.localeCompare(right.accountName);
+    });
+}
+
+function getInitialDialogAccountOrder({
+  editableAccounts,
+  allocations,
+}: {
+  editableAccounts: Array<{ id: string; name: string; balance: number }>;
+  allocations: Record<string, number>;
+}) {
+  return editableAccounts
+    .slice()
+    .sort((left, right) => {
+      const leftHasAllocation = (allocations[left.id] ?? 0) > 0;
+      const rightHasAllocation = (allocations[right.id] ?? 0) > 0;
+
+      if (leftHasAllocation !== rightHasAllocation) {
+        return leftHasAllocation ? -1 : 1;
+      }
+
+      if (right.balance !== left.balance) {
+        return right.balance - left.balance;
+      }
+
+      return left.name.localeCompare(right.name);
+    })
+    .map(account => account.id);
+}
+
+function getDefaultDialogSortDirection(column: DialogSortColumn) {
+  switch (column) {
+    case 'account':
+      return 'asc';
+    case 'default':
+      return 'desc';
+    case 'balance':
+    case 'currentAllocation':
+    case 'maxAvailable':
+    case 'allocation':
+      return 'desc';
+    default:
+      return 'desc';
+  }
+}
+
+function getDefaultReportSortDirection(column: ReportSortColumn) {
+  switch (column) {
+    case 'group':
+    case 'category':
+    case 'summary':
+      return 'asc';
+    case 'default':
+      return 'asc';
+    case 'balance':
+    case 'allocated':
+    case 'remainder':
+    case 'account':
+      return 'desc';
+    default:
+      return 'asc';
+  }
 }
 
 export function FundsLocation() {
@@ -257,6 +446,15 @@ export function FundsLocation() {
   const [draftAllocations, setDraftAllocations] = useState<DraftAllocationMap>(
     {},
   );
+  const [reportSort, setReportSort] = useState<ReportSortState>({
+    column: 'default',
+    direction: getDefaultReportSortDirection('default'),
+  });
+  const [groupFilter, setGroupFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [categoryDialogState, setCategoryDialogState] =
+    useState<CategoryDialogState | null>(null);
+  const [dialogSearch, setDialogSearch] = useState('');
 
   useEffect(() => {
     if (!allMonths || allMonths.length === 0) {
@@ -307,6 +505,11 @@ export function FundsLocation() {
     };
   }, [allMonths, monthData, queryClient, resolvedMonth]);
 
+  useEffect(() => {
+    setCategoryDialogState(null);
+    setDialogSearch('');
+  }, [resolvedMonth]);
+
   const displayData = useMemo(() => {
     if (!monthData) {
       return null;
@@ -348,6 +551,138 @@ export function FundsLocation() {
       totals: derived.totals,
     };
   }, [draftAllocations, monthData]);
+
+  const categoryRows = useMemo(() => {
+    if (!displayData) {
+      return [];
+    }
+
+    return displayData.categories.map((category, index) => {
+      const summaryAllocations = getCategorySummaryAllocations({
+        categoryId: category.id,
+        editableAccounts: displayData.editableAccounts,
+        draftAllocations,
+      });
+      const accountAmounts = Object.fromEntries(
+        displayData.editableAccounts.map(account => [
+          account.id,
+          getDraftAllocationAmount(draftAllocations, category.id, account.id),
+        ]),
+      ) as Record<string, number>;
+
+      return {
+        category,
+        index,
+        summaryAllocations,
+        summarySortValue:
+          summaryAllocations.length > 0
+            ? summaryAllocations
+                .map(
+                  allocation =>
+                    `${allocation.accountName}:${String(allocation.amount).padStart(12, '0')}`,
+                )
+                .join('|')
+            : 'Unassigned',
+        accountAmounts,
+      };
+    });
+  }, [displayData, draftAllocations]);
+
+  useEffect(() => {
+    if (
+      groupFilter !== '' &&
+      !categoryRows.some(row => row.category.group_name === groupFilter)
+    ) {
+      setGroupFilter('');
+    }
+  }, [categoryRows, groupFilter]);
+
+  const groupFilterOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(categoryRows.map(row => row.category.group_name)),
+      ).sort((left, right) => left.localeCompare(right)),
+    [categoryRows],
+  );
+
+  const filteredSortedCategoryRows = useMemo(() => {
+    const normalizedCategoryFilter = categoryFilter.trim().toLocaleLowerCase();
+
+    return categoryRows
+      .filter(
+        row =>
+          (groupFilter === '' || row.category.group_name === groupFilter) &&
+          (normalizedCategoryFilter === '' ||
+            row.category.name
+              .toLocaleLowerCase()
+              .includes(normalizedCategoryFilter)),
+      )
+      .sort((left, right) => {
+        const compareByDefaultOrder = () => left.index - right.index;
+
+        switch (reportSort.column) {
+          case 'default':
+            return compareByDefaultOrder();
+          case 'group': {
+            const comparison =
+              left.category.group_name.localeCompare(
+                right.category.group_name,
+              ) * (reportSort.direction === 'asc' ? 1 : -1);
+
+            return (
+              comparison ||
+              left.category.name.localeCompare(right.category.name) ||
+              compareByDefaultOrder()
+            );
+          }
+          case 'category': {
+            const comparison =
+              left.category.name.localeCompare(right.category.name) *
+              (reportSort.direction === 'asc' ? 1 : -1);
+
+            return (
+              comparison ||
+              left.category.group_name.localeCompare(
+                right.category.group_name,
+              ) ||
+              compareByDefaultOrder()
+            );
+          }
+          case 'balance':
+          case 'allocated':
+          case 'remainder': {
+            const comparison =
+              ((left.category[reportSort.column] as number) -
+                (right.category[reportSort.column] as number)) *
+              (reportSort.direction === 'asc' ? 1 : -1);
+
+            return (
+              comparison ||
+              left.category.name.localeCompare(right.category.name) ||
+              compareByDefaultOrder()
+            );
+          }
+          case 'summary': {
+            const comparison =
+              left.summarySortValue.localeCompare(right.summarySortValue) *
+              (reportSort.direction === 'asc' ? 1 : -1);
+
+            return comparison || compareByDefaultOrder();
+          }
+          case 'account': {
+            const accountId = reportSort.accountId;
+            const comparison =
+              ((left.accountAmounts[accountId ?? ''] ?? 0) -
+                (right.accountAmounts[accountId ?? ''] ?? 0)) *
+              (reportSort.direction === 'asc' ? 1 : -1);
+
+            return comparison || compareByDefaultOrder();
+          }
+          default:
+            return compareByDefaultOrder();
+        }
+      });
+  }, [categoryFilter, categoryRows, groupFilter, reportSort]);
 
   const saveMutation = useMutation({
     mutationFn: async (allocations: FundsLocationAllocationInput[]) => {
@@ -406,6 +741,132 @@ export function FundsLocation() {
   const accountWarningCount =
     displayData?.editableAccounts.filter(account => account.remainder !== 0)
       .length ?? 0;
+  const isHighAccountCount =
+    (displayData?.editableAccounts.length ?? 0) > HIGH_ACCOUNT_COUNT_THRESHOLD;
+
+  const selectedDialogCategory = useMemo(() => {
+    if (!displayData || !categoryDialogState) {
+      return null;
+    }
+
+    return (
+      displayData.categories.find(
+        category => category.id === categoryDialogState.categoryId,
+      ) ?? null
+    );
+  }, [categoryDialogState, displayData]);
+
+  const dialogAllocatedTotal = useMemo(() => {
+    if (!categoryDialogState) {
+      return 0;
+    }
+
+    return Object.values(categoryDialogState.allocations).reduce(
+      (sum, amount) => sum + amount,
+      0,
+    );
+  }, [categoryDialogState]);
+
+  const dialogRemainder = selectedDialogCategory
+    ? selectedDialogCategory.balance - dialogAllocatedTotal
+    : 0;
+
+  const dialogAccountRows = useMemo(() => {
+    if (!displayData || !categoryDialogState || !selectedDialogCategory) {
+      return [];
+    }
+
+    const normalizedSearch = dialogSearch.trim().toLocaleLowerCase();
+    const defaultOrderIndex = new Map(
+      categoryDialogState.defaultOrder.map((accountId, index) => [
+        accountId,
+        index,
+      ]),
+    );
+    const compareByDefaultOrder = (
+      leftAccountId: string,
+      rightAccountId: string,
+    ) =>
+      (defaultOrderIndex.get(leftAccountId) ?? Number.MAX_SAFE_INTEGER) -
+      (defaultOrderIndex.get(rightAccountId) ?? Number.MAX_SAFE_INTEGER);
+
+    return displayData.editableAccounts
+      .map(account => {
+        const value = categoryDialogState.allocations[account.id] ?? 0;
+        const globalValue = getDraftAllocationAmount(
+          draftAllocations,
+          selectedDialogCategory.id,
+          account.id,
+        );
+        const accountRemainder = account.remainder + globalValue - value;
+
+        return {
+          account,
+          value,
+          maxValue: getAllocationSliderMax({
+            currentValue: value,
+            categoryRemainder: dialogRemainder,
+            accountRemainder,
+          }),
+        };
+      })
+      .sort((left, right) => {
+        switch (categoryDialogState.sortColumn) {
+          case 'default':
+            return compareByDefaultOrder(left.account.id, right.account.id);
+          case 'account': {
+            const direction =
+              categoryDialogState.sortDirection === 'asc' ? 1 : -1;
+            const comparison =
+              left.account.name.localeCompare(right.account.name) * direction;
+
+            return (
+              comparison ||
+              compareByDefaultOrder(left.account.id, right.account.id)
+            );
+          }
+          case 'balance':
+          case 'currentAllocation':
+          case 'maxAvailable':
+          case 'allocation': {
+            const direction =
+              categoryDialogState.sortDirection === 'asc' ? 1 : -1;
+            const leftValue =
+              categoryDialogState.sortColumn === 'balance'
+                ? left.account.balance
+                : categoryDialogState.sortColumn === 'maxAvailable'
+                  ? left.maxValue
+                  : left.value;
+            const rightValue =
+              categoryDialogState.sortColumn === 'balance'
+                ? right.account.balance
+                : categoryDialogState.sortColumn === 'maxAvailable'
+                  ? right.maxValue
+                  : right.value;
+            const comparison = (leftValue - rightValue) * direction;
+
+            return (
+              comparison ||
+              compareByDefaultOrder(left.account.id, right.account.id)
+            );
+          }
+          default:
+            return compareByDefaultOrder(left.account.id, right.account.id);
+        }
+      })
+      .filter(
+        row =>
+          normalizedSearch === '' ||
+          row.account.name.toLocaleLowerCase().includes(normalizedSearch),
+      );
+  }, [
+    categoryDialogState,
+    dialogRemainder,
+    dialogSearch,
+    displayData,
+    draftAllocations,
+    selectedDialogCategory,
+  ]);
 
   const updateAllocation = (
     categoryId: string,
@@ -428,6 +889,253 @@ export function FundsLocation() {
         },
       };
     });
+  };
+
+  const openCategoryDialog = (categoryId: string) => {
+    if (!displayData) {
+      return;
+    }
+
+    const allocations = getCategoryDialogDraftAllocations(
+      categoryId,
+      displayData.editableAccounts.map(account => account.id),
+      draftAllocations,
+    );
+
+    setCategoryDialogState({
+      categoryId,
+      allocations,
+      defaultOrder: getInitialDialogAccountOrder({
+        editableAccounts: displayData.editableAccounts,
+        allocations,
+      }),
+      sortColumn: 'default',
+      sortDirection: getDefaultDialogSortDirection('default'),
+    });
+    setDialogSearch('');
+  };
+
+  const closeCategoryDialog = () => {
+    setCategoryDialogState(null);
+    setDialogSearch('');
+  };
+
+  const updateDialogAllocation = (accountId: string, amount: number) => {
+    setCategoryDialogState(current =>
+      current
+        ? {
+            ...current,
+            allocations: {
+              ...current.allocations,
+              [accountId]: amount,
+            },
+          }
+        : current,
+    );
+  };
+
+  const updateDialogSort = (column: DialogSortColumn) => {
+    setCategoryDialogState(current => {
+      if (!current) {
+        return current;
+      }
+
+      if (column === 'default') {
+        return {
+          ...current,
+          sortColumn: 'default',
+          sortDirection: getDefaultDialogSortDirection('default'),
+        };
+      }
+
+      const nextDirection =
+        current.sortColumn === column
+          ? current.sortDirection === 'asc'
+            ? 'desc'
+            : 'asc'
+          : getDefaultDialogSortDirection(column);
+
+      return {
+        ...current,
+        sortColumn: column,
+        sortDirection: nextDirection,
+      };
+    });
+  };
+
+  const updateReportSort = (
+    column: ReportSortColumn,
+    options?: { accountId?: string },
+  ) => {
+    setReportSort(current => {
+      const isSameAccountColumn =
+        column === 'account' &&
+        current.column === 'account' &&
+        current.accountId === options?.accountId;
+      const isSameColumn =
+        current.column === column &&
+        (column !== 'account' || isSameAccountColumn);
+      const nextDirection = isSameColumn
+        ? current.direction === 'asc'
+          ? 'desc'
+          : 'asc'
+        : getDefaultReportSortDirection(column);
+
+      return {
+        column,
+        direction: nextDirection,
+        accountId: options?.accountId,
+      };
+    });
+  };
+
+  const clearDialogRow = () => {
+    if (!displayData || !categoryDialogState) {
+      return;
+    }
+
+    setCategoryDialogState({
+      ...categoryDialogState,
+      allocations: Object.fromEntries(
+        displayData.editableAccounts.map(account => [account.id, 0]),
+      ),
+    });
+  };
+
+  const applyDialogAllocations = () => {
+    if (!categoryDialogState) {
+      return;
+    }
+
+    setDraftAllocations(current =>
+      replaceCategoryDraftAllocations({
+        draftAllocations: current,
+        categoryId: categoryDialogState.categoryId,
+        accountAllocations: categoryDialogState.allocations,
+      }),
+    );
+    closeCategoryDialog();
+  };
+
+  const renderDialogSortHeader = (
+    label: string,
+    column: DialogSortColumn,
+    align: 'left' | 'right' = 'left',
+  ) => {
+    const isActive = categoryDialogState?.sortColumn === column;
+    const sortLabel = isActive
+      ? categoryDialogState.sortDirection === 'asc'
+        ? t('{{label}} (ascending)', { label })
+        : t('{{label}} (descending)', { label })
+      : label;
+
+    return (
+      <button
+        type="button"
+        aria-label={sortLabel}
+        onClick={() => updateDialogSort(column)}
+        style={{
+          all: 'unset',
+          width: '100%',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: align === 'right' ? 'flex-end' : 'space-between',
+          gap: 8,
+          fontWeight: 600,
+          color: theme.pageText,
+        }}
+      >
+        <span>{label}</span>
+        <Text
+          style={{
+            ...styles.smallText,
+            color: isActive ? theme.pageText : theme.pageTextSubdued,
+          }}
+        >
+          {isActive
+            ? categoryDialogState.sortDirection === 'asc'
+              ? t('Asc')
+              : t('Desc')
+            : ''}
+        </Text>
+      </button>
+    );
+  };
+
+  const renderReportSortHeader = (
+    label: string,
+    column: ReportSortColumn,
+    options?: {
+      align?: 'left' | 'right';
+      accountId?: string;
+      subtitle?: string;
+    },
+  ) => {
+    const align = options?.align ?? 'left';
+    const isActive =
+      reportSort.column === column &&
+      (column !== 'account' || reportSort.accountId === options?.accountId);
+    const sortLabel = isActive
+      ? reportSort.direction === 'asc'
+        ? t('{{label}} (ascending)', { label })
+        : t('{{label}} (descending)', { label })
+      : label;
+
+    return (
+      <button
+        type="button"
+        aria-label={sortLabel}
+        onClick={() =>
+          updateReportSort(column, { accountId: options?.accountId })
+        }
+        style={{
+          all: 'unset',
+          width: '100%',
+          cursor: 'pointer',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: align === 'right' ? 'flex-end' : 'flex-start',
+          gap: 4,
+          color: theme.pageText,
+        }}
+      >
+        <View
+          style={{
+            gap: 8,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: align === 'right' ? 'flex-end' : 'space-between',
+            width: '100%',
+            fontWeight: 600,
+          }}
+        >
+          <span>{label}</span>
+          <Text
+            style={{
+              ...styles.smallText,
+              color: isActive ? theme.pageText : theme.pageTextSubdued,
+            }}
+          >
+            {isActive
+              ? reportSort.direction === 'asc'
+                ? t('Asc')
+                : t('Desc')
+              : ''}
+          </Text>
+        </View>
+        {options?.subtitle ? (
+          <Text
+            style={{
+              ...styles.smallText,
+              color: theme.pageTextSubdued,
+            }}
+          >
+            {options.subtitle}
+          </Text>
+        ) : null}
+      </button>
+    );
   };
 
   if (isMonthsPending || fundsLocationQuery.isPending || !displayData) {
@@ -578,7 +1286,7 @@ export function FundsLocation() {
                   alignItems: isNarrowWidth ? 'stretch' : 'center',
                 }}
               >
-                <Block
+                {/* <Block
                   style={{
                     flex: 1,
                     padding: 12,
@@ -593,9 +1301,9 @@ export function FundsLocation() {
                       remainder.
                     </Trans>
                   </Text>
-                </Block>
+                </Block> */}
 
-                {displayData.readOnlyAccounts.length > 0 && (
+                {/* {displayData.readOnlyAccounts.length > 0 && (
                   <Block
                     style={{
                       flex: 1,
@@ -624,7 +1332,88 @@ export function FundsLocation() {
                       ))}
                     </View>
                   </Block>
-                )}
+                )} */}
+              </View>
+
+              <View
+                style={{
+                  gap: 12,
+                  flexDirection: isNarrowWidth ? 'column' : 'row',
+                  alignItems: isNarrowWidth ? 'stretch' : 'flex-end',
+                }}
+              >
+                <label
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                    minWidth: isNarrowWidth ? undefined : 220,
+                  }}
+                >
+                  <Text
+                    style={{
+                      ...styles.smallText,
+                      color: theme.pageTextSubdued,
+                    }}
+                  >
+                    <Trans>Filter by group</Trans>
+                  </Text>
+                  <select
+                    aria-label={t('Filter by group')}
+                    value={groupFilter}
+                    onChange={event => setGroupFilter(event.target.value)}
+                    style={{
+                      height: 36,
+                      padding: '0 10px',
+                      borderRadius: 4,
+                      border: `1px solid ${theme.tableBorder}`,
+                      backgroundColor: theme.tableBackground,
+                      color: theme.pageText,
+                    }}
+                  >
+                    <option value="">
+                      <Trans>All groups</Trans>
+                    </option>
+                    {groupFilterOptions.map(groupName => (
+                      <option key={groupName} value={groupName}>
+                        {groupName}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <View
+                  style={{
+                    flex: 1,
+                    gap: 6,
+                  }}
+                >
+                  <Text
+                    style={{
+                      ...styles.smallText,
+                      color: theme.pageTextSubdued,
+                    }}
+                  >
+                    <Trans>Filter by category</Trans>
+                  </Text>
+                  <Search
+                    value={categoryFilter}
+                    onChange={setCategoryFilter}
+                    placeholder={t('Filter categories')}
+                    width="100%"
+                  />
+                </View>
+
+                {groupFilter !== '' || categoryFilter.trim() !== '' ? (
+                  <Button
+                    onPress={() => {
+                      setGroupFilter('');
+                      setCategoryFilter('');
+                    }}
+                  >
+                    <Trans>Clear filters</Trans>
+                  </Button>
+                ) : null}
               </View>
 
               {displayData.categories.length === 0 ? (
@@ -638,6 +1427,15 @@ export function FundsLocation() {
                     There are no positive category balances to allocate for this
                     month.
                   </Trans>
+                </Block>
+              ) : filteredSortedCategoryRows.length === 0 ? (
+                <Block
+                  style={{
+                    padding: 16,
+                    border: `1px solid ${theme.pillBorder}`,
+                  }}
+                >
+                  <Trans>No categories match the current filters.</Trans>
                 </Block>
               ) : (
                 <div
@@ -674,7 +1472,7 @@ export function FundsLocation() {
                             borderBottom: `1px solid ${theme.tableBorder}`,
                           }}
                         >
-                          <Trans>Group</Trans>
+                          {renderReportSortHeader(t('Group'), 'group')}
                         </th>
                         <th
                           style={{
@@ -688,7 +1486,7 @@ export function FundsLocation() {
                             borderBottom: `1px solid ${theme.tableBorder}`,
                           }}
                         >
-                          <Trans>Category</Trans>
+                          {renderReportSortHeader(t('Category'), 'category')}
                         </th>
                         <th
                           style={{
@@ -702,7 +1500,9 @@ export function FundsLocation() {
                             borderBottom: `1px solid ${theme.tableBorder}`,
                           }}
                         >
-                          <Trans>Balance</Trans>
+                          {renderReportSortHeader(t('Balance'), 'balance', {
+                            align: 'right',
+                          })}
                         </th>
                         <th
                           style={{
@@ -716,7 +1516,9 @@ export function FundsLocation() {
                             borderBottom: `1px solid ${theme.tableBorder}`,
                           }}
                         >
-                          <Trans>Allocated</Trans>
+                          {renderReportSortHeader(t('Allocated'), 'allocated', {
+                            align: 'right',
+                          })}
                         </th>
                         <th
                           style={{
@@ -730,168 +1532,287 @@ export function FundsLocation() {
                             borderBottom: `1px solid ${theme.tableBorder}`,
                           }}
                         >
-                          <Trans>Remainder</Trans>
+                          {renderReportSortHeader(t('Remainder'), 'remainder', {
+                            align: 'right',
+                          })}
                         </th>
-                        {displayData.editableAccounts.map(account => (
-                          <th
-                            key={account.id}
-                            style={{
-                              minWidth: COLUMN_WIDTHS.account,
-                              width: COLUMN_WIDTHS.account,
-                              padding: 12,
-                              verticalAlign: 'bottom',
-                              textAlign: 'left',
-                              borderBottom: `1px solid ${theme.tableBorder}`,
-                              position: 'sticky',
-                              top: 0,
-                              zIndex: 4,
-                              backgroundColor: theme.tableBackground,
-                            }}
-                          >
-                            <Block>{account.name}</Block>
-                            <Text
+                        {isHighAccountCount ? (
+                          <>
+                            <th
                               style={{
-                                ...styles.smallText,
-                                color: theme.pageTextSubdued,
+                                minWidth: 260,
+                                width: 260,
+                                padding: 12,
+                                verticalAlign: 'bottom',
+                                textAlign: 'left',
+                                borderBottom: `1px solid ${theme.tableBorder}`,
+                                position: 'sticky',
+                                top: 0,
+                                zIndex: 4,
+                                backgroundColor: theme.tableBackground,
                               }}
                             >
-                              {format(account.balance, 'financial')}
-                            </Text>
-                          </th>
-                        ))}
+                              {renderReportSortHeader(
+                                t('Allocation summary'),
+                                'summary',
+                              )}
+                            </th>
+                            <th
+                              style={{
+                                minWidth: 140,
+                                width: 140,
+                                padding: 12,
+                                verticalAlign: 'bottom',
+                                textAlign: 'left',
+                                borderBottom: `1px solid ${theme.tableBorder}`,
+                                position: 'sticky',
+                                top: 0,
+                                zIndex: 4,
+                                backgroundColor: theme.tableBackground,
+                              }}
+                            >
+                              <Trans>Actions</Trans>
+                            </th>
+                          </>
+                        ) : (
+                          displayData.editableAccounts.map(account => (
+                            <th
+                              key={account.id}
+                              style={{
+                                minWidth: COLUMN_WIDTHS.account,
+                                width: COLUMN_WIDTHS.account,
+                                padding: 12,
+                                verticalAlign: 'bottom',
+                                textAlign: 'left',
+                                borderBottom: `1px solid ${theme.tableBorder}`,
+                                position: 'sticky',
+                                top: 0,
+                                zIndex: 4,
+                                backgroundColor: theme.tableBackground,
+                              }}
+                            >
+                              {renderReportSortHeader(account.name, 'account', {
+                                accountId: account.id,
+                                subtitle: format(account.balance, 'financial'),
+                              })}
+                            </th>
+                          ))
+                        )}
                       </tr>
                     </thead>
                     <tbody>
-                      {displayData.categories.map(category => (
-                        <tr key={category.id}>
-                          <td
-                            style={{
-                              ...getStickyCellStyle(
-                                'group',
-                                stickyOffsets.group,
-                              ),
-                              padding: 12,
-                              borderBottom: `1px solid ${theme.tableBorder}`,
-                            }}
-                          >
-                            {category.group_name}
-                          </td>
-                          <td
-                            style={{
-                              ...getStickyCellStyle(
-                                'category',
-                                stickyOffsets.category,
-                              ),
-                              padding: 12,
-                              borderBottom: `1px solid ${theme.tableBorder}`,
-                            }}
-                          >
-                            {category.name}
-                          </td>
-                          <td
-                            style={{
-                              ...getStickyCellStyle(
-                                'balance',
-                                stickyOffsets.balance,
-                              ),
-                              padding: 12,
-                              textAlign: 'right',
-                              borderBottom: `1px solid ${theme.tableBorder}`,
-                              ...styles.tnum,
-                            }}
-                          >
-                            <FinancialText>
-                              {format(category.balance, 'financial')}
-                            </FinancialText>
-                          </td>
-                          <td
-                            style={{
-                              ...getStickyCellStyle(
-                                'allocated',
-                                stickyOffsets.allocated,
-                              ),
-                              padding: 12,
-                              textAlign: 'right',
-                              borderBottom: `1px solid ${theme.tableBorder}`,
-                              color: category.isOverallocated
-                                ? theme.errorText
-                                : theme.pageText,
-                              ...styles.tnum,
-                            }}
-                          >
-                            <FinancialText>
-                              {format(category.allocated, 'financial')}
-                            </FinancialText>
-                          </td>
-                          <td
-                            style={{
-                              ...getStickyCellStyle(
-                                'remainder',
-                                stickyOffsets.remainder,
-                              ),
-                              padding: 12,
-                              textAlign: 'right',
-                              borderBottom: `1px solid ${theme.tableBorder}`,
-                              color:
-                                category.remainder === 0
-                                  ? theme.pageText
-                                  : category.remainder > 0
-                                    ? theme.noticeText
-                                    : theme.errorText,
-                              ...styles.tnum,
-                            }}
-                          >
-                            <FinancialText>
-                              {format(category.remainder, 'financial')}
-                            </FinancialText>
-                          </td>
-                          {displayData.editableAccounts.map(account => {
-                            const value =
-                              draftAllocations[
-                                getFundsLocationAllocationKey(
-                                  category.id,
-                                  account.id,
-                                )
-                              ]?.amount ?? 0;
-                            const maxAllocation = getAllocationSliderMax({
-                              currentValue: value,
-                              categoryRemainder: category.remainder,
-                              accountRemainder: account.remainder,
-                            });
+                      {filteredSortedCategoryRows.map(row => {
+                        const { category, summaryAllocations, accountAmounts } =
+                          row;
+                        const visibleSummaryAllocations =
+                          summaryAllocations.slice(0, 3);
+                        const hiddenSummaryCount =
+                          summaryAllocations.length -
+                          visibleSummaryAllocations.length;
 
-                            return (
-                              <td
-                                key={`${category.id}-${account.id}`}
-                                style={{
-                                  minWidth: COLUMN_WIDTHS.account,
-                                  width: COLUMN_WIDTHS.account,
-                                  padding: 8,
-                                  borderBottom: `1px solid ${theme.tableBorder}`,
-                                }}
-                              >
-                                <AllocationSlider
-                                  label={t(
-                                    '{{category}} allocation in {{account}}',
-                                    {
-                                      category: category.name,
-                                      account: account.name,
-                                    },
+                        return (
+                          <tr key={category.id}>
+                            <td
+                              style={{
+                                ...getStickyCellStyle(
+                                  'group',
+                                  stickyOffsets.group,
+                                ),
+                                padding: 12,
+                                borderBottom: `1px solid ${theme.tableBorder}`,
+                              }}
+                            >
+                              {category.group_name}
+                            </td>
+                            <td
+                              style={{
+                                ...getStickyCellStyle(
+                                  'category',
+                                  stickyOffsets.category,
+                                ),
+                                padding: 12,
+                                borderBottom: `1px solid ${theme.tableBorder}`,
+                              }}
+                            >
+                              {category.name}
+                            </td>
+                            <td
+                              style={{
+                                ...getStickyCellStyle(
+                                  'balance',
+                                  stickyOffsets.balance,
+                                ),
+                                padding: 12,
+                                textAlign: 'right',
+                                borderBottom: `1px solid ${theme.tableBorder}`,
+                                ...styles.tnum,
+                              }}
+                            >
+                              <FinancialText>
+                                {format(category.balance, 'financial')}
+                              </FinancialText>
+                            </td>
+                            <td
+                              style={{
+                                ...getStickyCellStyle(
+                                  'allocated',
+                                  stickyOffsets.allocated,
+                                ),
+                                padding: 12,
+                                textAlign: 'right',
+                                borderBottom: `1px solid ${theme.tableBorder}`,
+                                color: category.isOverallocated
+                                  ? theme.errorText
+                                  : theme.pageText,
+                                ...styles.tnum,
+                              }}
+                            >
+                              <FinancialText>
+                                {format(category.allocated, 'financial')}
+                              </FinancialText>
+                            </td>
+                            <td
+                              style={{
+                                ...getStickyCellStyle(
+                                  'remainder',
+                                  stickyOffsets.remainder,
+                                ),
+                                padding: 12,
+                                textAlign: 'right',
+                                borderBottom: `1px solid ${theme.tableBorder}`,
+                                color:
+                                  category.remainder === 0
+                                    ? theme.pageText
+                                    : category.remainder > 0
+                                      ? theme.noticeText
+                                      : theme.errorText,
+                                ...styles.tnum,
+                              }}
+                            >
+                              <FinancialText>
+                                {format(category.remainder, 'financial')}
+                              </FinancialText>
+                            </td>
+                            {isHighAccountCount ? (
+                              <>
+                                <td
+                                  style={{
+                                    minWidth: 260,
+                                    width: 260,
+                                    padding: 12,
+                                    borderBottom: `1px solid ${theme.tableBorder}`,
+                                    verticalAlign: 'top',
+                                  }}
+                                >
+                                  {visibleSummaryAllocations.length > 0 ? (
+                                    <View style={{ gap: 4 }}>
+                                      {visibleSummaryAllocations.map(
+                                        allocation => (
+                                          <View
+                                            key={`${category.id}-${allocation.accountId}`}
+                                            style={{
+                                              gap: 8,
+                                              flexDirection: 'row',
+                                              justifyContent: 'space-between',
+                                            }}
+                                          >
+                                            <Text>
+                                              {allocation.accountName}
+                                            </Text>
+                                            <FinancialText style={styles.tnum}>
+                                              {format(
+                                                allocation.amount,
+                                                'financial',
+                                              )}
+                                            </FinancialText>
+                                          </View>
+                                        ),
+                                      )}
+                                      {hiddenSummaryCount > 0 ? (
+                                        <Text
+                                          style={{
+                                            ...styles.smallText,
+                                            color: theme.pageTextSubdued,
+                                          }}
+                                        >
+                                          {t('+{{count}} more', {
+                                            count: hiddenSummaryCount,
+                                          })}
+                                        </Text>
+                                      ) : null}
+                                    </View>
+                                  ) : (
+                                    <Text
+                                      style={{
+                                        color: theme.pageTextSubdued,
+                                      }}
+                                    >
+                                      <Trans>Unassigned</Trans>
+                                    </Text>
                                   )}
-                                  value={value}
-                                  maxValue={maxAllocation}
-                                  onUpdate={nextValue =>
-                                    updateAllocation(
-                                      category.id,
-                                      account.id,
-                                      Math.min(nextValue, maxAllocation),
-                                    )
-                                  }
-                                />
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
+                                </td>
+                                <td
+                                  style={{
+                                    minWidth: 140,
+                                    width: 140,
+                                    padding: 12,
+                                    borderBottom: `1px solid ${theme.tableBorder}`,
+                                    verticalAlign: 'top',
+                                  }}
+                                >
+                                  <Button
+                                    onPress={() =>
+                                      openCategoryDialog(category.id)
+                                    }
+                                  >
+                                    <Trans>Edit accounts</Trans>
+                                  </Button>
+                                </td>
+                              </>
+                            ) : (
+                              displayData.editableAccounts.map(account => {
+                                const value = accountAmounts[account.id] ?? 0;
+                                const maxAllocation = getAllocationSliderMax({
+                                  currentValue: value,
+                                  categoryRemainder: category.remainder,
+                                  accountRemainder: account.remainder,
+                                });
+
+                                return (
+                                  <td
+                                    key={`${category.id}-${account.id}`}
+                                    style={{
+                                      minWidth: COLUMN_WIDTHS.account,
+                                      width: COLUMN_WIDTHS.account,
+                                      padding: 8,
+                                      borderBottom: `1px solid ${theme.tableBorder}`,
+                                    }}
+                                  >
+                                    <AllocationSlider
+                                      label={t(
+                                        '{{category}} allocation in {{account}}',
+                                        {
+                                          category: category.name,
+                                          account: account.name,
+                                        },
+                                      )}
+                                      value={value}
+                                      maxValue={maxAllocation}
+                                      onUpdate={nextValue =>
+                                        updateAllocation(
+                                          category.id,
+                                          account.id,
+                                          Math.min(nextValue, maxAllocation),
+                                        )
+                                      }
+                                    />
+                                  </td>
+                                );
+                              })
+                            )}
+                          </tr>
+                        );
+                      })}
                     </tbody>
                     <tfoot>
                       <tr>
@@ -977,40 +1898,68 @@ export function FundsLocation() {
                             )}
                           </FinancialText>
                         </td>
-                        {displayData.editableAccounts.map(account => (
-                          <td
-                            key={account.id}
-                            style={{
-                              minWidth: COLUMN_WIDTHS.account,
-                              width: COLUMN_WIDTHS.account,
-                              padding: 12,
-                              borderTop: `1px solid ${theme.tableBorder}`,
-                              verticalAlign: 'top',
-                            }}
-                          >
-                            <Block style={{ ...styles.tnum, marginBottom: 4 }}>
-                              <FinancialText>
-                                {format(account.allocated, 'financial')}
-                              </FinancialText>
-                            </Block>
-                            <Text
+                        {isHighAccountCount ? (
+                          <>
+                            <td
                               style={{
-                                ...styles.smallText,
-                                color:
-                                  account.remainder === 0
-                                    ? theme.pageTextSubdued
-                                    : theme.noticeText,
+                                minWidth: 260,
+                                width: 260,
+                                padding: 12,
+                                borderTop: `1px solid ${theme.tableBorder}`,
+                                color: theme.pageTextSubdued,
                               }}
                             >
                               <Trans>
-                                Remainder:{' '}
-                                <FinancialText>
-                                  {format(account.remainder, 'financial')}
-                                </FinancialText>
+                                Use each row's editor to adjust accounts.
                               </Trans>
-                            </Text>
-                          </td>
-                        ))}
+                            </td>
+                            <td
+                              style={{
+                                minWidth: 140,
+                                width: 140,
+                                padding: 12,
+                                borderTop: `1px solid ${theme.tableBorder}`,
+                              }}
+                            />
+                          </>
+                        ) : (
+                          displayData.editableAccounts.map(account => (
+                            <td
+                              key={account.id}
+                              style={{
+                                minWidth: COLUMN_WIDTHS.account,
+                                width: COLUMN_WIDTHS.account,
+                                padding: 12,
+                                borderTop: `1px solid ${theme.tableBorder}`,
+                                verticalAlign: 'top',
+                              }}
+                            >
+                              <Block
+                                style={{ ...styles.tnum, marginBottom: 4 }}
+                              >
+                                <FinancialText>
+                                  {format(account.allocated, 'financial')}
+                                </FinancialText>
+                              </Block>
+                              <Text
+                                style={{
+                                  ...styles.smallText,
+                                  color:
+                                    account.remainder === 0
+                                      ? theme.pageTextSubdued
+                                      : theme.noticeText,
+                                }}
+                              >
+                                <Trans>
+                                  Remainder:{' '}
+                                  <FinancialText>
+                                    {format(account.remainder, 'financial')}
+                                  </FinancialText>
+                                </Trans>
+                              </Text>
+                            </td>
+                          ))
+                        )}
                       </tr>
                     </tfoot>
                   </table>
@@ -1020,6 +1969,261 @@ export function FundsLocation() {
           )}
         </View>
       </View>
+
+      {selectedDialogCategory && categoryDialogState ? (
+        <Modal
+          name="funds-location-category-allocation"
+          onClose={closeCategoryDialog}
+          containerProps={{
+            style: {
+              minWidth: 'min(960px, 95vw)',
+              maxWidth: 'min(960px, 95vw)',
+            },
+          }}
+        >
+          <ModalHeader
+            title={selectedDialogCategory.name}
+            rightContent={<ModalCloseButton onPress={closeCategoryDialog} />}
+          />
+
+          <View style={{ gap: 16, padding: 12 }}>
+            <View
+              style={{
+                gap: 12,
+                flexWrap: 'wrap',
+                flexDirection: 'row',
+              }}
+            >
+              <SummaryStat
+                label={t('Category balance')}
+                value={selectedDialogCategory.balance}
+              />
+              <SummaryStat
+                label={t('Currently allocated')}
+                value={dialogAllocatedTotal}
+              />
+              <SummaryStat
+                label={t('Remainder')}
+                value={dialogRemainder}
+                tone={
+                  dialogRemainder === 0
+                    ? 'default'
+                    : dialogRemainder > 0
+                      ? 'warning'
+                      : 'danger'
+                }
+              />
+            </View>
+
+            {displayData.editableAccounts.length > ACCOUNT_SEARCH_THRESHOLD ? (
+              <Search
+                value={dialogSearch}
+                onChange={setDialogSearch}
+                placeholder={t('Search accounts')}
+                isInModal
+                width="100%"
+              />
+            ) : null}
+
+            <div
+              style={{
+                overflowY: 'auto',
+                maxHeight: 'min(60vh, 640px)',
+                border: `1px solid ${theme.tableBorder}`,
+                backgroundColor: theme.tableBackground,
+              }}
+            >
+              <table
+                style={{
+                  width: '100%',
+                  borderCollapse: 'separate',
+                  borderSpacing: 0,
+                }}
+              >
+                <thead>
+                  <tr>
+                    <th
+                      style={{
+                        padding: 12,
+                        textAlign: 'left',
+                        borderBottom: `1px solid ${theme.tableBorder}`,
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 2,
+                        backgroundColor: theme.tableBackground,
+                      }}
+                    >
+                      {renderDialogSortHeader(t('Account'), 'account')}
+                    </th>
+                    <th
+                      style={{
+                        padding: 12,
+                        textAlign: 'right',
+                        borderBottom: `1px solid ${theme.tableBorder}`,
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 2,
+                        backgroundColor: theme.tableBackground,
+                      }}
+                    >
+                      {renderDialogSortHeader(t('Balance'), 'balance', 'right')}
+                    </th>
+                    <th
+                      style={{
+                        padding: 12,
+                        textAlign: 'right',
+                        borderBottom: `1px solid ${theme.tableBorder}`,
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 2,
+                        backgroundColor: theme.tableBackground,
+                      }}
+                    >
+                      {renderDialogSortHeader(
+                        t('Current allocation'),
+                        'currentAllocation',
+                        'right',
+                      )}
+                    </th>
+                    <th
+                      style={{
+                        padding: 12,
+                        textAlign: 'right',
+                        borderBottom: `1px solid ${theme.tableBorder}`,
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 2,
+                        backgroundColor: theme.tableBackground,
+                      }}
+                    >
+                      {renderDialogSortHeader(
+                        t('Max available'),
+                        'maxAvailable',
+                        'right',
+                      )}
+                    </th>
+                    <th
+                      style={{
+                        padding: 12,
+                        textAlign: 'left',
+                        borderBottom: `1px solid ${theme.tableBorder}`,
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 2,
+                        backgroundColor: theme.tableBackground,
+                      }}
+                    >
+                      {renderDialogSortHeader(t('Allocation'), 'allocation')}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dialogAccountRows.length > 0 ? (
+                    dialogAccountRows.map(row => (
+                      <tr key={row.account.id}>
+                        <td
+                          style={{
+                            padding: 12,
+                            borderBottom: `1px solid ${theme.tableBorder}`,
+                          }}
+                        >
+                          {row.account.name}
+                        </td>
+                        <td
+                          style={{
+                            padding: 12,
+                            textAlign: 'right',
+                            borderBottom: `1px solid ${theme.tableBorder}`,
+                            ...styles.tnum,
+                          }}
+                        >
+                          <FinancialText>
+                            {format(row.account.balance, 'financial')}
+                          </FinancialText>
+                        </td>
+                        <td
+                          style={{
+                            padding: 12,
+                            textAlign: 'right',
+                            borderBottom: `1px solid ${theme.tableBorder}`,
+                            ...styles.tnum,
+                          }}
+                        >
+                          <FinancialText>
+                            {format(row.value, 'financial')}
+                          </FinancialText>
+                        </td>
+                        <td
+                          style={{
+                            padding: 12,
+                            textAlign: 'right',
+                            borderBottom: `1px solid ${theme.tableBorder}`,
+                            ...styles.tnum,
+                          }}
+                        >
+                          <FinancialText>
+                            {format(row.maxValue, 'financial')}
+                          </FinancialText>
+                        </td>
+                        <td
+                          style={{
+                            padding: 12,
+                            borderBottom: `1px solid ${theme.tableBorder}`,
+                            minWidth: 280,
+                          }}
+                        >
+                          <AllocationSlider
+                            label={t('{{category}} allocation in {{account}}', {
+                              category: selectedDialogCategory.name,
+                              account: row.account.name,
+                            })}
+                            value={row.value}
+                            maxValue={row.maxValue}
+                            showSummary={false}
+                            onUpdate={nextValue =>
+                              updateDialogAllocation(
+                                row.account.id,
+                                Math.min(nextValue, row.maxValue),
+                              )
+                            }
+                          />
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td
+                        colSpan={5}
+                        style={{
+                          padding: 16,
+                          color: theme.pageTextSubdued,
+                        }}
+                      >
+                        <Trans>No accounts match this search.</Trans>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <ModalButtons
+              leftContent={
+                <Button onPress={clearDialogRow}>
+                  <Trans>Clear row</Trans>
+                </Button>
+              }
+            >
+              <Button onPress={closeCategoryDialog}>
+                <Trans>Cancel</Trans>
+              </Button>
+              <Button variant="primary" onPress={applyDialogAllocations}>
+                <Trans>Apply</Trans>
+              </Button>
+            </ModalButtons>
+          </View>
+        </Modal>
+      ) : null}
     </Page>
   );
 }

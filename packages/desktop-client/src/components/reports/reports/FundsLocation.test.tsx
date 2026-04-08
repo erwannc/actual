@@ -1,4 +1,4 @@
-import React from 'react';
+import type { ReactNode } from 'react';
 
 import {
   fireEvent,
@@ -17,6 +17,7 @@ import type {
 
 import { FundsLocation } from './FundsLocation';
 
+import type { UseFormatResult } from '@desktop-client/hooks/useFormat';
 import { createTestQueryClient, TestProviders } from '@desktop-client/mocks';
 
 vi.mock('loot-core/platform/client/connection');
@@ -36,23 +37,37 @@ vi.mock('@desktop-client/hooks/useNavigate', () => ({
 }));
 vi.mock('@desktop-client/hooks/useFormat', () => ({
   useFormat: () => {
-    const format = ((value: unknown) => String(value ?? 0)) as {
-      (value: unknown): string;
-      forEdit: (value: number) => string;
-      fromEdit: (value: string, defaultValue?: number | null) => number | null;
-      currency: { code: string; decimalPlaces: number; symbol: string };
-    };
-
-    format.forEdit = value => String(value ?? 0);
-    format.fromEdit = (value, defaultValue = 0) =>
-      value === '' ? defaultValue : Number(value);
-    format.currency = {
-      code: 'USD',
-      decimalPlaces: 2,
-      symbol: '$',
-    };
-
-    return format;
+    return Object.assign(
+      (value: unknown) => {
+        if (value == null || value === '') {
+          return '0';
+        }
+        if (typeof value === 'string') {
+          return value;
+        }
+        if (typeof value === 'object') {
+          return JSON.stringify(value);
+        }
+        if (
+          typeof value === 'number' ||
+          typeof value === 'boolean' ||
+          typeof value === 'bigint'
+        ) {
+          return String(value);
+        }
+        return JSON.stringify(value);
+      },
+      {
+        forEdit: (value: number) => String(value ?? 0),
+        fromEdit: (value: string, defaultValue: number | null = 0) =>
+          value === '' ? defaultValue : Number(value),
+        currency: {
+          code: 'USD',
+          decimalPlaces: 2,
+          symbol: '$',
+        },
+      },
+    ) satisfies UseFormatResult;
   },
 }));
 vi.mock('@desktop-client/components/budget/MonthPicker', () => ({
@@ -74,6 +89,57 @@ vi.mock('@desktop-client/components/budget/MonthPicker', () => ({
         {monthBounds.end}
       </button>
     </div>
+  ),
+}));
+vi.mock('@desktop-client/components/common/Modal', () => ({
+  Modal: ({ name, children }: { name: string; children: ReactNode }) => (
+    <div data-testid={`${name}-modal`}>{children}</div>
+  ),
+  ModalHeader: ({
+    title,
+    rightContent,
+  }: {
+    title?: ReactNode;
+    rightContent?: ReactNode;
+  }) => (
+    <div>
+      <h1>{title}</h1>
+      {rightContent}
+    </div>
+  ),
+  ModalButtons: ({
+    leftContent,
+    children,
+  }: {
+    leftContent?: ReactNode;
+    children: ReactNode;
+  }) => (
+    <div>
+      {leftContent}
+      {children}
+    </div>
+  ),
+  ModalCloseButton: ({ onPress }: { onPress: () => void }) => (
+    <button onClick={onPress} type="button">
+      Close
+    </button>
+  ),
+}));
+vi.mock('@desktop-client/components/common/Search', () => ({
+  Search: ({
+    value,
+    onChange,
+    placeholder,
+  }: {
+    value: string;
+    onChange: (value: string) => void;
+    placeholder: string;
+  }) => (
+    <input
+      value={value}
+      placeholder={placeholder}
+      onChange={event => onChange(event.target.value)}
+    />
   ),
 }));
 
@@ -100,6 +166,21 @@ const BASE_ACCOUNTS = [
   },
 ];
 
+const HIGH_ACCOUNT_ACCOUNTS = [
+  ...Array.from({ length: 12 }, (_, index) => ({
+    id: `account-${index + 1}`,
+    name: `Account ${String(index + 1).padStart(2, '0')}`,
+    balance: 20000 - index * 750,
+    isEditable: true,
+  })),
+  {
+    id: 'credit-card',
+    name: 'Credit Card',
+    balance: -3000,
+    isEditable: false,
+  },
+];
+
 const BASE_CATEGORIES = [
   {
     id: 'food',
@@ -115,10 +196,46 @@ const BASE_CATEGORIES = [
     group_name: 'Usual Expenses',
     balance: 5000,
   },
+  {
+    id: 'vacation',
+    name: 'Vacation',
+    group_id: 'true-expenses',
+    group_name: 'True Expenses',
+    balance: 3000,
+  },
 ];
 
+let currentAccounts = BASE_ACCOUNTS;
+let currentCategories = BASE_CATEGORIES;
 let savedAllocations: Record<string, FundsLocationAllocationInput[]> = {};
 let trackingBudget = false;
+
+function useBaseFixture() {
+  currentAccounts = BASE_ACCOUNTS;
+  currentCategories = BASE_CATEGORIES;
+  savedAllocations = {
+    '2019-02': [
+      { categoryId: 'food', accountId: 'checking', amount: 3000 },
+      { categoryId: 'utilities', accountId: 'savings', amount: 1200 },
+    ],
+    '2019-03': [],
+  };
+}
+
+function useHighAccountFixture() {
+  currentAccounts = HIGH_ACCOUNT_ACCOUNTS;
+  currentCategories = BASE_CATEGORIES;
+  savedAllocations = {
+    '2019-02': [
+      { categoryId: 'food', accountId: 'account-1', amount: 3000 },
+      { categoryId: 'food', accountId: 'account-2', amount: 1500 },
+      { categoryId: 'food', accountId: 'account-3', amount: 1000 },
+      { categoryId: 'food', accountId: 'account-4', amount: 500 },
+      { categoryId: 'utilities', accountId: 'account-12', amount: 400 },
+    ],
+    '2019-03': [],
+  };
+}
 
 function buildMonthData(month: string): FundsLocationMonthEntity {
   if (trackingBudget) {
@@ -149,8 +266,8 @@ function buildMonthData(month: string): FundsLocationMonthEntity {
     amount: allocation.amount,
   }));
   const derived = deriveFundsLocationData({
-    accounts: BASE_ACCOUNTS,
-    categories: BASE_CATEGORIES,
+    accounts: currentAccounts,
+    categories: currentCategories,
     allocations,
   });
 
@@ -197,18 +314,86 @@ function setupMockServer() {
   });
 }
 
+function getCategoryRow(categoryName: string) {
+  const row = screen.getByText(categoryName).closest('tr');
+  expect(row).not.toBeNull();
+  return row!;
+}
+
+function getDialogAccountNames(modal: HTMLElement) {
+  return within(modal)
+    .getAllByRole('row')
+    .slice(1)
+    .map(row => within(row).getAllByRole('cell')[0].textContent ?? '');
+}
+
+function getReportCategoryNames() {
+  const table = screen.getByTestId('funds-location-table');
+  return Array.from(table.querySelectorAll('tbody tr')).map(row => {
+    const cells = row.querySelectorAll('td');
+    return cells[1]?.textContent ?? '';
+  });
+}
+
 describe('FundsLocation', () => {
   beforeEach(() => {
     trackingBudget = false;
-    savedAllocations = {
-      '2019-02': [
-        { categoryId: 'food', accountId: 'checking', amount: 3000 },
-        { categoryId: 'utilities', accountId: 'savings', amount: 1200 },
-      ],
-      '2019-03': [],
-    };
-
+    useBaseFixture();
     setupMockServer();
+  });
+
+  test('renders grid mode when there are 6 or fewer editable accounts', async () => {
+    renderFundsLocation();
+
+    await screen.findByTestId('funds-location-table');
+
+    expect(screen.getByText('Checking')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('columnheader', { name: 'Allocation summary' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Edit accounts' }),
+    ).not.toBeInTheDocument();
+  });
+
+  test('filters the report by group and category', async () => {
+    renderFundsLocation();
+
+    await screen.findByTestId('funds-location-table');
+
+    fireEvent.change(screen.getByLabelText('Filter by group'), {
+      target: { value: 'Usual Expenses' },
+    });
+
+    await waitFor(() => {
+      expect(getReportCategoryNames()).toEqual(['Food', 'Utilities']);
+    });
+
+    fireEvent.change(screen.getByPlaceholderText('Filter categories'), {
+      target: { value: 'util' },
+    });
+
+    await waitFor(() => {
+      expect(getReportCategoryNames()).toEqual(['Utilities']);
+    });
+
+    expect(screen.queryByText('Vacation')).not.toBeInTheDocument();
+  });
+
+  test('sorts grid-mode report rows by account column', async () => {
+    renderFundsLocation();
+
+    await screen.findByTestId('funds-location-table');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Savings' }));
+
+    expect(getReportCategoryNames()).toEqual(['Utilities', 'Food', 'Vacation']);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Savings (descending)' }),
+    );
+
+    expect(getReportCategoryNames()).toEqual(['Food', 'Vacation', 'Utilities']);
   });
 
   test('renders saved allocations after a reload', async () => {
@@ -249,16 +434,14 @@ describe('FundsLocation', () => {
     fireEvent.change(foodCheckingSlider, {
       target: { value: '2500' },
     });
-    fireEvent.change(screen.getByLabelText('Utilities allocation in Savings'), {
+    fireEvent.change(utilitiesSavingsSlider, {
       target: { value: '1000' },
     });
 
-    const foodRow = screen.getByText('Food').closest('tr');
-    const accountTotalsRow = screen.getByText('Account totals').closest('tr');
+    const foodRow = getCategoryRow('Food');
+    const accountTotalsRow = getCategoryRow('Account totals');
 
-    expect(foodRow).not.toBeNull();
-    expect(accountTotalsRow).not.toBeNull();
-    expect(within(foodRow!).getByText('4500')).toBeInTheDocument();
+    expect(within(foodRow).getByText('4500')).toBeInTheDocument();
     expect(accountTotalsRow).toHaveTextContent('3500');
     expect(accountTotalsRow).toHaveTextContent('Remainder: 12500');
     expect(accountTotalsRow).toHaveTextContent('Remainder: 6000');
@@ -300,6 +483,260 @@ describe('FundsLocation', () => {
       );
     });
     expect(savedAllocations['2019-02']).toEqual([]);
+  });
+
+  test('renders compact mode summary and actions when there are more than 6 editable accounts', async () => {
+    useHighAccountFixture();
+    setupMockServer();
+
+    renderFundsLocation();
+
+    await screen.findByRole('columnheader', { name: 'Allocation summary' });
+
+    expect(
+      screen.getByRole('columnheader', { name: 'Actions' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('columnheader', { name: 'Account 01' }),
+    ).not.toBeInTheDocument();
+
+    const foodRow = getCategoryRow('Food');
+    expect(within(foodRow).getByText('Account 01')).toBeInTheDocument();
+    expect(within(foodRow).getByText('Account 02')).toBeInTheDocument();
+    expect(within(foodRow).getByText('Account 03')).toBeInTheDocument();
+    expect(within(foodRow).getByText('+1 more')).toBeInTheDocument();
+    expect(
+      within(foodRow).getByRole('button', { name: 'Edit accounts' }),
+    ).toBeInTheDocument();
+  });
+
+  test('sorts compact-mode report rows by visible columns', async () => {
+    useHighAccountFixture();
+    setupMockServer();
+
+    renderFundsLocation();
+
+    await screen.findByRole('columnheader', { name: 'Allocation summary' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Balance' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Balance (descending)' }),
+    );
+
+    expect(getReportCategoryNames()).toEqual(['Vacation', 'Utilities', 'Food']);
+  });
+
+  test('dialog search filters account rows and cancel discards changes', async () => {
+    useHighAccountFixture();
+    setupMockServer();
+
+    renderFundsLocation();
+    await screen.findByTestId('funds-location-table');
+
+    fireEvent.click(
+      within(getCategoryRow('Food')).getByRole('button', {
+        name: 'Edit accounts',
+      }),
+    );
+
+    const modal = await screen.findByTestId(
+      'funds-location-category-allocation-modal',
+    );
+
+    expect(within(modal).getByText('Food')).toBeInTheDocument();
+
+    fireEvent.change(within(modal).getByPlaceholderText('Search accounts'), {
+      target: { value: 'Account 12' },
+    });
+
+    await waitFor(() => {
+      expect(within(modal).getByText('Account 12')).toBeInTheDocument();
+    });
+    expect(within(modal).queryByText('Account 01')).not.toBeInTheDocument();
+
+    fireEvent.change(
+      within(modal).getByLabelText('Food allocation in Account 12'),
+      {
+        target: { value: '250' },
+      },
+    );
+    fireEvent.click(within(modal).getByRole('button', { name: 'Cancel' }));
+
+    fireEvent.click(
+      within(getCategoryRow('Food')).getByRole('button', {
+        name: 'Edit accounts',
+      }),
+    );
+
+    const reopenedModal = await screen.findByTestId(
+      'funds-location-category-allocation-modal',
+    );
+    expect(
+      within(reopenedModal).getByLabelText('Food allocation in Account 01'),
+    ).toHaveValue('3000');
+    expect(
+      within(reopenedModal).getByLabelText('Food allocation in Account 12'),
+    ).toHaveValue('0');
+  });
+
+  test('default modal order stays stable while sliders are edited', async () => {
+    useHighAccountFixture();
+    setupMockServer();
+
+    renderFundsLocation();
+    await screen.findByTestId('funds-location-table');
+
+    fireEvent.click(
+      within(getCategoryRow('Food')).getByRole('button', {
+        name: 'Edit accounts',
+      }),
+    );
+
+    const modal = await screen.findByTestId(
+      'funds-location-category-allocation-modal',
+    );
+    const initialOrder = getDialogAccountNames(modal);
+
+    fireEvent.change(
+      within(modal).getByLabelText('Food allocation in Account 12'),
+      {
+        target: { value: '250' },
+      },
+    );
+
+    expect(getDialogAccountNames(modal)).toEqual(initialOrder);
+  });
+
+  test('modal column headers sort account rows', async () => {
+    useHighAccountFixture();
+    setupMockServer();
+
+    renderFundsLocation();
+    await screen.findByTestId('funds-location-table');
+
+    fireEvent.click(
+      within(getCategoryRow('Food')).getByRole('button', {
+        name: 'Edit accounts',
+      }),
+    );
+
+    const modal = await screen.findByTestId(
+      'funds-location-category-allocation-modal',
+    );
+
+    fireEvent.click(within(modal).getByRole('button', { name: 'Balance' }));
+
+    const sortedNames = getDialogAccountNames(modal);
+    expect(sortedNames[0]).toBe('Account 01');
+    expect(sortedNames.at(-1)).toBe('Account 12');
+
+    fireEvent.click(
+      within(modal).getByRole('button', { name: 'Balance (descending)' }),
+    );
+
+    const reverseSortedNames = getDialogAccountNames(modal);
+    expect(reverseSortedNames[0]).toBe('Account 12');
+    expect(reverseSortedNames.at(-1)).toBe('Account 01');
+  });
+
+  test('dialog clear row only clears the selected category', async () => {
+    useHighAccountFixture();
+    setupMockServer();
+
+    renderFundsLocation();
+    await screen.findByTestId('funds-location-table');
+
+    fireEvent.click(
+      within(getCategoryRow('Food')).getByRole('button', {
+        name: 'Edit accounts',
+      }),
+    );
+
+    const modal = await screen.findByTestId(
+      'funds-location-category-allocation-modal',
+    );
+    fireEvent.click(within(modal).getByRole('button', { name: 'Clear row' }));
+    fireEvent.click(within(modal).getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => {
+      expect(
+        within(getCategoryRow('Food')).getByText('Unassigned'),
+      ).toBeInTheDocument();
+    });
+    expect(getCategoryRow('Utilities')).toHaveTextContent('Account 12');
+    expect(getCategoryRow('Utilities')).toHaveTextContent('400');
+  });
+
+  test('dialog apply updates the main table and save persists after reload', async () => {
+    useHighAccountFixture();
+    setupMockServer();
+
+    const firstRender = renderFundsLocation();
+    await screen.findByTestId('funds-location-table');
+
+    fireEvent.click(
+      within(getCategoryRow('Food')).getByRole('button', {
+        name: 'Edit accounts',
+      }),
+    );
+
+    const modal = await screen.findByTestId(
+      'funds-location-category-allocation-modal',
+    );
+
+    fireEvent.change(
+      within(modal).getByLabelText('Food allocation in Account 02'),
+      {
+        target: { value: '0' },
+      },
+    );
+    fireEvent.change(
+      within(modal).getByLabelText('Food allocation in Account 04'),
+      {
+        target: { value: '1500' },
+      },
+    );
+    fireEvent.click(within(modal).getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => {
+      expect(getCategoryRow('Food')).toHaveTextContent('5500');
+    });
+    expect(getCategoryRow('Food')).toHaveTextContent('1500');
+    expect(getCategoryRow('Food')).toHaveTextContent('Account 04');
+    expect(getCategoryRow('Food')).not.toHaveTextContent('+1 more');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save allocations' }));
+
+    await waitFor(() => {
+      expect(savedAllocations['2019-02']).toEqual(
+        expect.arrayContaining([
+          { categoryId: 'food', accountId: 'account-1', amount: 3000 },
+          { categoryId: 'food', accountId: 'account-3', amount: 1000 },
+          { categoryId: 'food', accountId: 'account-4', amount: 1500 },
+        ]),
+      );
+    });
+
+    firstRender.unmount();
+    renderFundsLocation();
+
+    await screen.findByTestId('funds-location-table');
+
+    fireEvent.click(
+      within(getCategoryRow('Food')).getByRole('button', {
+        name: 'Edit accounts',
+      }),
+    );
+
+    const reloadedModal = await screen.findByTestId(
+      'funds-location-category-allocation-modal',
+    );
+    expect(
+      within(reloadedModal).getByLabelText('Food allocation in Account 02'),
+    ).toHaveValue('0');
+    expect(
+      within(reloadedModal).getByLabelText('Food allocation in Account 04'),
+    ).toHaveValue('1500');
   });
 
   test('shows unsupported messaging for tracking budgets', async () => {
