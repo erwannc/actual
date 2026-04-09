@@ -5,6 +5,10 @@ import { Trans, useTranslation } from 'react-i18next';
 import { Block } from '@actual-app/components/block';
 import { Button } from '@actual-app/components/button';
 import { useResponsive } from '@actual-app/components/hooks/useResponsive';
+import {
+  SvgArrowDown,
+  SvgArrowUp,
+} from '@actual-app/components/icons/v1';
 import { styles } from '@actual-app/components/styles';
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
@@ -49,12 +53,19 @@ type DraftAllocationMap = Record<string, FundsLocationAllocationInput>;
 const COLUMN_WIDTHS = {
   group: 170,
   category: 220,
-  balance: 130,
-  allocated: 130,
-  remainder: 130,
-  account: 160,
+  balance: 103,
+  allocated: 103,
+  remainder: 103,
 };
-const HIGH_ACCOUNT_COUNT_THRESHOLD = 6;
+const REPORT_FIXED_COLUMNS_WIDTH =
+  COLUMN_WIDTHS.group +
+  COLUMN_WIDTHS.category +
+  COLUMN_WIDTHS.balance +
+  COLUMN_WIDTHS.allocated +
+  COLUMN_WIDTHS.remainder;
+const REPORT_FLEX_COLUMN_MIN_WIDTH = 140;
+const REPORT_HIGH_COUNT_COLUMNS_MIN_WIDTH = 260 + 140;
+const HIGH_ACCOUNT_COUNT_THRESHOLD = 5;
 const ACCOUNT_SEARCH_THRESHOLD = 10;
 
 type ReportSortColumn =
@@ -88,6 +99,48 @@ type ReportSortState = {
   direction: ReportSortDirection;
   accountId?: string;
 };
+
+function renderSortDirectionIcon(direction: 'asc' | 'desc') {
+  const Icon = direction === 'asc' ? SvgArrowDown : SvgArrowUp;
+
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        display: 'flex',
+        color: theme.tableHeaderText,
+      }}
+    >
+      <Icon width={10} height={10} style={{ marginLeft: 5 }} />
+    </span>
+  );
+}
+
+function getSortHeaderButtonStyle(
+  align: 'left' | 'right' = 'left',
+): CSSProperties {
+  return {
+    width: 'calc(100% + 10px)',
+    marginLeft: -5,
+    marginRight: -5,
+    justifyContent: 'center',
+    alignItems: align === 'right' ? 'flex-end' : 'flex-start',
+    gap: 4,
+    color: theme.tableHeaderText,
+    fontWeight: 300,
+  };
+}
+
+function getSortHeaderLabelStyle(align: 'left' | 'right' = 'left'): CSSProperties {
+  return {
+    display: 'block',
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    textAlign: align,
+  };
+}
 
 function buildDraftAllocationMap(
   allocations: FundsLocationMonthEntity['allocations'],
@@ -181,6 +234,21 @@ function getStickyCellStyle(
     zIndex: 2,
     ...extraStyle,
   } satisfies CSSProperties;
+}
+
+function getReportTableMinWidth({
+  editableAccountCount,
+  isHighAccountCount,
+}: {
+  editableAccountCount: number;
+  isHighAccountCount: boolean;
+}) {
+  return (
+    REPORT_FIXED_COLUMNS_WIDTH +
+    (isHighAccountCount
+      ? REPORT_HIGH_COUNT_COLUMNS_MIN_WIDTH
+      : editableAccountCount * REPORT_FLEX_COLUMN_MIN_WIDTH)
+  );
 }
 
 function SummaryStat({
@@ -1060,36 +1128,24 @@ export function FundsLocation() {
       : label;
 
     return (
-      <button
-        type="button"
+      <Button
+        variant="bare"
         aria-label={sortLabel}
-        onClick={() => updateDialogSort(column)}
-        style={{
-          all: 'unset',
-          width: '100%',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: align === 'right' ? 'flex-end' : 'space-between',
-          gap: 8,
-          fontWeight: 600,
-          color: theme.pageText,
-        }}
+        onPress={() => updateDialogSort(column)}
+        style={getSortHeaderButtonStyle(align)}
       >
-        <span>{label}</span>
-        <Text
+        <View
           style={{
-            ...styles.smallText,
-            color: isActive ? theme.pageText : theme.pageTextSubdued,
+            width: '100%',
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: align === 'right' ? 'flex-end' : 'flex-start',
           }}
         >
-          {isActive
-            ? categoryDialogState.sortDirection === 'asc'
-              ? t('Asc')
-              : t('Desc')
-            : ''}
-        </Text>
-      </button>
+          <span style={getSortHeaderLabelStyle(align)}>{label}</span>
+          {isActive && renderSortDirectionIcon(categoryDialogState.sortDirection)}
+        </View>
+      </Button>
     );
   };
 
@@ -1113,58 +1169,36 @@ export function FundsLocation() {
       : label;
 
     return (
-      <button
-        type="button"
+      <Button
+        variant="bare"
         aria-label={sortLabel}
-        onClick={() =>
+        onPress={() =>
           updateReportSort(column, { accountId: options?.accountId })
         }
-        style={{
-          all: 'unset',
-          width: '100%',
-          cursor: 'pointer',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: align === 'right' ? 'flex-end' : 'flex-start',
-          gap: 4,
-          color: theme.pageText,
-        }}
+        style={getSortHeaderButtonStyle(align)}
       >
         <View
           style={{
-            gap: 8,
+            width: '100%',
             flexDirection: 'row',
             alignItems: 'center',
-            justifyContent: align === 'right' ? 'flex-end' : 'space-between',
-            width: '100%',
-            fontWeight: 600,
+            justifyContent: align === 'right' ? 'flex-end' : 'flex-start',
           }}
         >
-          <span>{label}</span>
-          <Text
-            style={{
-              ...styles.smallText,
-              color: isActive ? theme.pageText : theme.pageTextSubdued,
-            }}
-          >
-            {isActive
-              ? reportSort.direction === 'asc'
-                ? t('Asc')
-                : t('Desc')
-              : ''}
-          </Text>
+          <span style={getSortHeaderLabelStyle(align)}>{label}</span>
+          {isActive && renderSortDirectionIcon(reportSort.direction)}
         </View>
         {options?.subtitle ? (
           <Text
             style={{
               ...styles.smallText,
-              color: theme.pageTextSubdued,
+              color: theme.tableTextSubdued,
             }}
           >
             {options.subtitle}
           </Text>
         ) : null}
-      </button>
+      </Button>
     );
   };
 
@@ -1195,6 +1229,10 @@ export function FundsLocation() {
       COLUMN_WIDTHS.balance +
       COLUMN_WIDTHS.allocated,
   };
+  const reportTableMinWidth = getReportTableMinWidth({
+    editableAccountCount: displayData.editableAccounts.length,
+    isHighAccountCount,
+  });
 
   return (
     <Page header={header} padding={0}>
@@ -1487,12 +1525,30 @@ export function FundsLocation() {
                 >
                   <table
                     style={{
-                      width: 'max-content',
-                      minWidth: '100%',
+                      width: '100%',
+                      minWidth: reportTableMinWidth,
+                      tableLayout: 'fixed',
                       borderCollapse: 'separate',
                       borderSpacing: 0,
                     }}
                   >
+                    <colgroup>
+                      <col style={{ width: COLUMN_WIDTHS.group }} />
+                      <col style={{ width: COLUMN_WIDTHS.category }} />
+                      <col style={{ width: COLUMN_WIDTHS.balance }} />
+                      <col style={{ width: COLUMN_WIDTHS.allocated }} />
+                      <col style={{ width: COLUMN_WIDTHS.remainder }} />
+                      {isHighAccountCount ? (
+                        <>
+                          <col />
+                          <col />
+                        </>
+                      ) : (
+                        displayData.editableAccounts.map(account => (
+                          <col key={account.id} />
+                        ))
+                      )}
+                    </colgroup>
                     <thead>
                       <tr>
                         <th
@@ -1575,8 +1631,6 @@ export function FundsLocation() {
                           <>
                             <th
                               style={{
-                                minWidth: 260,
-                                width: 260,
                                 padding: 12,
                                 verticalAlign: 'bottom',
                                 textAlign: 'left',
@@ -1594,8 +1648,6 @@ export function FundsLocation() {
                             </th>
                             <th
                               style={{
-                                minWidth: 140,
-                                width: 140,
                                 padding: 12,
                                 verticalAlign: 'bottom',
                                 textAlign: 'left',
@@ -1614,8 +1666,6 @@ export function FundsLocation() {
                             <th
                               key={account.id}
                               style={{
-                                minWidth: COLUMN_WIDTHS.account,
-                                width: COLUMN_WIDTHS.account,
                                 padding: 12,
                                 verticalAlign: 'bottom',
                                 textAlign: 'left',
@@ -1732,8 +1782,6 @@ export function FundsLocation() {
                               <>
                                 <td
                                   style={{
-                                    minWidth: 260,
-                                    width: 260,
                                     padding: 12,
                                     borderBottom: `1px solid ${theme.tableBorder}`,
                                     verticalAlign: 'top',
@@ -1788,8 +1836,6 @@ export function FundsLocation() {
                                 </td>
                                 <td
                                   style={{
-                                    minWidth: 140,
-                                    width: 140,
                                     padding: 12,
                                     borderBottom: `1px solid ${theme.tableBorder}`,
                                     verticalAlign: 'top',
@@ -1817,8 +1863,6 @@ export function FundsLocation() {
                                   <td
                                     key={`${category.id}-${account.id}`}
                                     style={{
-                                      minWidth: COLUMN_WIDTHS.account,
-                                      width: COLUMN_WIDTHS.account,
                                       padding: 8,
                                       borderBottom: `1px solid ${theme.tableBorder}`,
                                     }}
@@ -1937,8 +1981,6 @@ export function FundsLocation() {
                           <>
                             <td
                               style={{
-                                minWidth: 260,
-                                width: 260,
                                 padding: 12,
                                 borderTop: `1px solid ${theme.tableBorder}`,
                                 color: theme.pageTextSubdued,
@@ -1950,8 +1992,6 @@ export function FundsLocation() {
                             </td>
                             <td
                               style={{
-                                minWidth: 140,
-                                width: 140,
                                 padding: 12,
                                 borderTop: `1px solid ${theme.tableBorder}`,
                               }}
@@ -1962,8 +2002,6 @@ export function FundsLocation() {
                             <td
                               key={account.id}
                               style={{
-                                minWidth: COLUMN_WIDTHS.account,
-                                width: COLUMN_WIDTHS.account,
                                 padding: 12,
                                 borderTop: `1px solid ${theme.tableBorder}`,
                                 verticalAlign: 'top',
