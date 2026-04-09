@@ -856,9 +856,6 @@ export function FundsLocation() {
   );
   const isDirty = initialSerialized !== draftSerialized;
 
-  const categoryWarningCount =
-    displayData?.categories.filter(category => category.remainder !== 0)
-      .length ?? 0;
   const accountWarningCount =
     displayData?.editableAccounts.filter(account => account.remainder !== 0)
       .length ?? 0;
