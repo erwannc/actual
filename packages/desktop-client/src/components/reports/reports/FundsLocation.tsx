@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 
@@ -50,23 +50,17 @@ import { fundsLocationQueries } from '@desktop-client/reports';
 
 type DraftAllocationMap = Record<string, FundsLocationAllocationInput>;
 
-const COLUMN_WIDTHS = {
-  group: 170,
-  category: 220,
-  balance: 103,
-  allocated: 103,
-  remainder: 103,
-};
-const REPORT_FIXED_COLUMNS_WIDTH =
-  COLUMN_WIDTHS.group +
-  COLUMN_WIDTHS.category +
-  COLUMN_WIDTHS.balance +
-  COLUMN_WIDTHS.allocated +
-  COLUMN_WIDTHS.remainder;
-const REPORT_FLEX_COLUMN_MIN_WIDTH = 140;
-const REPORT_HIGH_COUNT_COLUMNS_MIN_WIDTH = 260 + 140;
+const STICKY_COLUMNS = [
+  'group',
+  'category',
+  'balance',
+  'allocated',
+  'remainder',
+] as const;
 const HIGH_ACCOUNT_COUNT_THRESHOLD = 5;
 const ACCOUNT_SEARCH_THRESHOLD = 10;
+
+type StickyReportColumn = (typeof STICKY_COLUMNS)[number];
 
 type ReportSortColumn =
   | 'default'
@@ -221,19 +215,42 @@ function toDraftAllocationArray(
 }
 
 function getStickyCellStyle(
-  column: keyof typeof COLUMN_WIDTHS,
+  column: StickyReportColumn,
   left: number,
   extraStyle?: CSSProperties,
 ) {
   return {
     position: 'sticky',
     left,
-    minWidth: COLUMN_WIDTHS[column],
-    width: COLUMN_WIDTHS[column],
+    minWidth: getStickyColumnMinWidth(column),
     backgroundColor: theme.tableBackground,
     zIndex: 2,
     ...extraStyle,
   } satisfies CSSProperties;
+}
+
+function getStickyColumnMinWidth(column: StickyReportColumn) {
+  switch (column) {
+    case 'group':
+    case 'category':
+      return 100;
+    case 'balance':
+    case 'allocated':
+    case 'remainder':
+      return 103;
+    default:
+      return 100;
+  }
+}
+
+function getDefaultStickyColumnWidths(): Record<StickyReportColumn, number> {
+  return {
+    group: getStickyColumnMinWidth('group'),
+    category: getStickyColumnMinWidth('category'),
+    balance: getStickyColumnMinWidth('balance'),
+    allocated: getStickyColumnMinWidth('allocated'),
+    remainder: getStickyColumnMinWidth('remainder'),
+  };
 }
 
 function getReportTableMinWidth({
@@ -244,10 +261,10 @@ function getReportTableMinWidth({
   isHighAccountCount: boolean;
 }) {
   return (
-    REPORT_FIXED_COLUMNS_WIDTH +
-    (isHighAccountCount
-      ? REPORT_HIGH_COUNT_COLUMNS_MIN_WIDTH
-      : editableAccountCount * REPORT_FLEX_COLUMN_MIN_WIDTH)
+    STICKY_COLUMNS.reduce(
+      (sum, column) => sum + getStickyColumnMinWidth(column),
+      0,
+    ) + (isHighAccountCount ? 260 + 140 : editableAccountCount * 140)
   );
 }
 
@@ -272,8 +289,8 @@ function SummaryStat({
   return (
     <Block
       style={{
-        flex: '1 1 180px',
-        minWidth: 180,
+        flex: '1 1 160px',
+        minWidth: 160,
         padding: 14,
         backgroundColor: theme.tableBackground,
         boxShadow: '0 1px 4px rgba(0, 0, 0, 0.08)',
@@ -535,6 +552,12 @@ export function FundsLocation() {
   const [categoryDialogState, setCategoryDialogState] =
     useState<CategoryDialogState | null>(null);
   const [dialogSearch, setDialogSearch] = useState('');
+  const stickyHeaderRefs = useRef<
+    Partial<Record<StickyReportColumn, HTMLTableCellElement | null>>
+  >({});
+  const [stickyColumnWidths, setStickyColumnWidths] = useState<
+    Record<StickyReportColumn, number>
+  >(() => getDefaultStickyColumnWidths());
 
   useEffect(() => {
     if (!allMonths || allMonths.length === 0) {
@@ -853,6 +876,57 @@ export function FundsLocation() {
       ) ?? null
     );
   }, [categoryDialogState, displayData]);
+
+  const setStickyHeaderRef =
+    (column: StickyReportColumn) =>
+    (element: HTMLTableCellElement | null) => {
+      stickyHeaderRefs.current[column] = element;
+    };
+
+  useLayoutEffect(() => {
+    if (!displayData) {
+      return;
+    }
+
+    function measureStickyColumns() {
+      setStickyColumnWidths(current => {
+        const next = { ...current };
+        let hasChanged = false;
+
+        for (const column of STICKY_COLUMNS) {
+          const element = stickyHeaderRefs.current[column];
+          const width = Math.max(
+            getStickyColumnMinWidth(column),
+            Math.ceil(element?.getBoundingClientRect().width ?? 0),
+          );
+
+          if (current[column] !== width) {
+            next[column] = width;
+            hasChanged = true;
+          }
+        }
+
+        return hasChanged ? next : current;
+      });
+    }
+
+    measureStickyColumns();
+
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => measureStickyColumns());
+
+    for (const column of STICKY_COLUMNS) {
+      const element = stickyHeaderRefs.current[column];
+      if (element) {
+        observer.observe(element);
+      }
+    }
+
+    return () => observer.disconnect();
+  }, [displayData, isHighAccountCount, isNarrowWidth, reportSort]);
 
   const dialogAllocatedTotal = useMemo(() => {
     if (!categoryDialogState) {
@@ -1219,15 +1293,17 @@ export function FundsLocation() {
 
   const stickyOffsets = {
     group: 0,
-    category: COLUMN_WIDTHS.group,
-    balance: COLUMN_WIDTHS.group + COLUMN_WIDTHS.category,
+    category: stickyColumnWidths.group,
+    balance: stickyColumnWidths.group + stickyColumnWidths.category,
     allocated:
-      COLUMN_WIDTHS.group + COLUMN_WIDTHS.category + COLUMN_WIDTHS.balance,
+      stickyColumnWidths.group +
+      stickyColumnWidths.category +
+      stickyColumnWidths.balance,
     remainder:
-      COLUMN_WIDTHS.group +
-      COLUMN_WIDTHS.category +
-      COLUMN_WIDTHS.balance +
-      COLUMN_WIDTHS.allocated,
+      stickyColumnWidths.group +
+      stickyColumnWidths.category +
+      stickyColumnWidths.balance +
+      stickyColumnWidths.allocated,
   };
   const reportTableMinWidth = getReportTableMinWidth({
     editableAccountCount: displayData.editableAccounts.length,
@@ -1409,10 +1485,11 @@ export function FundsLocation() {
 
               <View
                 style={{
-                  gap: 12,
-                  paddingTop: 8,
-                  flexDirection: isNarrowWidth ? 'column' : 'row',
-                  alignItems: isNarrowWidth ? 'stretch' : 'flex-end',
+                  gap: 8,
+                  paddingBottom: 8,
+                  flexDirection: 'row',
+                  flexWrap: 'wrap',
+                  alignItems: 'stretch',
                 }}
               >
                 <label
@@ -1420,7 +1497,8 @@ export function FundsLocation() {
                     display: 'flex',
                     flexDirection: 'column',
                     gap: 4,
-                    minWidth: isNarrowWidth ? undefined : 220,
+                    flex: '1 1 220px',
+                    minWidth: 220,
                   }}
                 >
                   <Text
@@ -1457,7 +1535,8 @@ export function FundsLocation() {
 
                 <View
                   style={{
-                    flex: 1,
+                    flex: '2 1 280px',
+                    minWidth: 240,
                     gap: 6,
                   }}
                 >
@@ -1479,6 +1558,9 @@ export function FundsLocation() {
 
                 {groupFilter !== '' || categoryFilter.trim() !== '' ? (
                   <Button
+                    style={{
+                      alignSelf: isNarrowWidth ? 'stretch' : 'flex-end',
+                    }}
                     onPress={() => {
                       setGroupFilter('');
                       setCategoryFilter('');
@@ -1527,31 +1609,14 @@ export function FundsLocation() {
                     style={{
                       width: '100%',
                       minWidth: reportTableMinWidth,
-                      tableLayout: 'fixed',
                       borderCollapse: 'separate',
                       borderSpacing: 0,
                     }}
                   >
-                    <colgroup>
-                      <col style={{ width: COLUMN_WIDTHS.group }} />
-                      <col style={{ width: COLUMN_WIDTHS.category }} />
-                      <col style={{ width: COLUMN_WIDTHS.balance }} />
-                      <col style={{ width: COLUMN_WIDTHS.allocated }} />
-                      <col style={{ width: COLUMN_WIDTHS.remainder }} />
-                      {isHighAccountCount ? (
-                        <>
-                          <col />
-                          <col />
-                        </>
-                      ) : (
-                        displayData.editableAccounts.map(account => (
-                          <col key={account.id} />
-                        ))
-                      )}
-                    </colgroup>
                     <thead>
                       <tr>
                         <th
+                          ref={setStickyHeaderRef('group')}
                           style={{
                             ...getStickyCellStyle(
                               'group',
@@ -1566,6 +1631,7 @@ export function FundsLocation() {
                           {renderReportSortHeader(t('Group'), 'group')}
                         </th>
                         <th
+                          ref={setStickyHeaderRef('category')}
                           style={{
                             ...getStickyCellStyle(
                               'category',
@@ -1580,6 +1646,7 @@ export function FundsLocation() {
                           {renderReportSortHeader(t('Category'), 'category')}
                         </th>
                         <th
+                          ref={setStickyHeaderRef('balance')}
                           style={{
                             ...getStickyCellStyle(
                               'balance',
@@ -1596,6 +1663,7 @@ export function FundsLocation() {
                           })}
                         </th>
                         <th
+                          ref={setStickyHeaderRef('allocated')}
                           style={{
                             ...getStickyCellStyle(
                               'allocated',
@@ -1612,6 +1680,7 @@ export function FundsLocation() {
                           })}
                         </th>
                         <th
+                          ref={setStickyHeaderRef('remainder')}
                           style={{
                             ...getStickyCellStyle(
                               'remainder',
@@ -1631,6 +1700,7 @@ export function FundsLocation() {
                           <>
                             <th
                               style={{
+                                minWidth: 260,
                                 padding: 12,
                                 verticalAlign: 'bottom',
                                 textAlign: 'left',
@@ -1648,6 +1718,7 @@ export function FundsLocation() {
                             </th>
                             <th
                               style={{
+                                minWidth: 140,
                                 padding: 12,
                                 verticalAlign: 'bottom',
                                 textAlign: 'left',
@@ -1666,6 +1737,7 @@ export function FundsLocation() {
                             <th
                               key={account.id}
                               style={{
+                                minWidth: 140,
                                 padding: 12,
                                 verticalAlign: 'bottom',
                                 textAlign: 'left',
@@ -1782,6 +1854,7 @@ export function FundsLocation() {
                               <>
                                 <td
                                   style={{
+                                    minWidth: 260,
                                     padding: 12,
                                     borderBottom: `1px solid ${theme.tableBorder}`,
                                     verticalAlign: 'top',
@@ -1836,6 +1909,7 @@ export function FundsLocation() {
                                 </td>
                                 <td
                                   style={{
+                                    minWidth: 140,
                                     padding: 12,
                                     borderBottom: `1px solid ${theme.tableBorder}`,
                                     verticalAlign: 'top',
@@ -1863,6 +1937,7 @@ export function FundsLocation() {
                                   <td
                                     key={`${category.id}-${account.id}`}
                                     style={{
+                                      minWidth: 140,
                                       padding: 8,
                                       borderBottom: `1px solid ${theme.tableBorder}`,
                                     }}
@@ -1896,16 +1971,12 @@ export function FundsLocation() {
                     <tfoot>
                       <tr>
                         <td
-                          colSpan={2}
                           style={{
                             ...getStickyCellStyle(
                               'group',
                               stickyOffsets.group,
                               { top: 'auto', zIndex: 3 },
                             ),
-                            minWidth:
-                              COLUMN_WIDTHS.group + COLUMN_WIDTHS.category,
-                            width: COLUMN_WIDTHS.group + COLUMN_WIDTHS.category,
                             padding: 12,
                             borderTop: `1px solid ${theme.tableBorder}`,
                             fontWeight: 600,
@@ -1913,6 +1984,17 @@ export function FundsLocation() {
                         >
                           <Trans>Account totals</Trans>
                         </td>
+                        <td
+                          style={{
+                            ...getStickyCellStyle(
+                              'category',
+                              stickyOffsets.category,
+                              { top: 'auto', zIndex: 3 },
+                            ),
+                            padding: 12,
+                            borderTop: `1px solid ${theme.tableBorder}`,
+                          }}
+                        />
                         <td
                           style={{
                             ...getStickyCellStyle(
@@ -1981,6 +2063,7 @@ export function FundsLocation() {
                           <>
                             <td
                               style={{
+                                minWidth: 260,
                                 padding: 12,
                                 borderTop: `1px solid ${theme.tableBorder}`,
                                 color: theme.pageTextSubdued,
@@ -1992,6 +2075,7 @@ export function FundsLocation() {
                             </td>
                             <td
                               style={{
+                                minWidth: 140,
                                 padding: 12,
                                 borderTop: `1px solid ${theme.tableBorder}`,
                               }}
@@ -2002,6 +2086,7 @@ export function FundsLocation() {
                             <td
                               key={account.id}
                               style={{
+                                minWidth: 140,
                                 padding: 12,
                                 borderTop: `1px solid ${theme.tableBorder}`,
                                 verticalAlign: 'top',
@@ -2287,12 +2372,14 @@ export function FundsLocation() {
                 </Button>
               }
             >
-              <Button onPress={closeCategoryDialog}>
-                <Trans>Cancel</Trans>
-              </Button>
-              <Button variant="primary" onPress={applyDialogAllocations}>
-                <Trans>Apply</Trans>
-              </Button>
+              <View style={{ gap: 8, flexDirection: 'row' }}>
+                <Button onPress={closeCategoryDialog}>
+                  <Trans>Cancel</Trans>
+                </Button>
+                <Button variant="primary" onPress={applyDialogAllocations}>
+                  <Trans>Apply</Trans>
+                </Button>
+              </View>
             </ModalButtons>
           </View>
         </Modal>
