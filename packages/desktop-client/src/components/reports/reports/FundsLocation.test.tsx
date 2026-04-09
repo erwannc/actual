@@ -481,6 +481,37 @@ describe('FundsLocation', () => {
     expect(utilitiesSavingsSlider).toHaveAttribute('max', '5000');
   });
 
+  test('updates allocations from the main table inline amount editor', async () => {
+    renderFundsLocation();
+
+    await screen.findByLabelText('Food allocation in Checking');
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Edit Food allocation in Checking amount',
+      }),
+    );
+    fireEvent.change(
+      screen.getByLabelText('Edit Food allocation in Checking amount'),
+      {
+        target: { value: '2500' },
+      },
+    );
+    fireEvent.keyUp(
+      screen.getByLabelText('Edit Food allocation in Checking amount'),
+      {
+        key: 'Enter',
+      },
+    );
+
+    await waitFor(() => {
+      expect(getCategoryRow('Food')).toHaveTextContent('4500');
+      expect(screen.getByLabelText('Food allocation in Checking')).toHaveValue(
+        '2500',
+      );
+    });
+  });
+
   test('switching months carries over the latest saved snapshot', async () => {
     renderFundsLocation();
 
@@ -848,6 +879,63 @@ describe('FundsLocation', () => {
     expect(
       within(reloadedModal).getByLabelText('Food allocation in Account 04'),
     ).toHaveValue('1500');
+  });
+
+  test('dialog inline amount editor applies precise values', async () => {
+    useHighAccountFixture();
+    setupMockServer();
+
+    renderFundsLocation();
+    await screen.findByTestId('funds-location-table');
+
+    fireEvent.click(
+      within(getCategoryRow('Food')).getByRole('button', {
+        name: 'Edit accounts',
+      }),
+    );
+
+    const modal = await screen.findByTestId(
+      'funds-location-category-allocation-modal',
+    );
+
+    fireEvent.click(
+      within(modal).getByRole('button', {
+        name: 'Edit Food allocation in Account 12 amount',
+      }),
+    );
+    fireEvent.change(
+      within(modal).getByLabelText('Edit Food allocation in Account 12 amount'),
+      {
+        target: { value: '250' },
+      },
+    );
+    fireEvent.keyUp(
+      within(modal).getByLabelText('Edit Food allocation in Account 12 amount'),
+      {
+        key: 'Enter',
+      },
+    );
+
+    await waitFor(() => {
+      expect(
+        within(modal).getByLabelText('Food allocation in Account 12'),
+      ).toHaveValue('250');
+    });
+
+    fireEvent.click(within(modal).getByRole('button', { name: 'Apply' }));
+
+    fireEvent.click(
+      within(getCategoryRow('Food')).getByRole('button', {
+        name: 'Edit accounts',
+      }),
+    );
+
+    const reopenedModal = await screen.findByTestId(
+      'funds-location-category-allocation-modal',
+    );
+    expect(
+      within(reopenedModal).getByLabelText('Food allocation in Account 12'),
+    ).toHaveValue('250');
   });
 
   test('shows unsupported messaging for tracking budgets', async () => {

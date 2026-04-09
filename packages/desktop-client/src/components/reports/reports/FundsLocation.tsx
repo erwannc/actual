@@ -42,6 +42,7 @@ import {
   PageHeader,
 } from '@desktop-client/components/Page';
 import { LoadingIndicator } from '@desktop-client/components/reports/LoadingIndicator';
+import { FinancialInput } from '@desktop-client/components/util/FinancialInput';
 import { useFormat } from '@desktop-client/hooks/useFormat';
 import { useNavigate } from '@desktop-client/hooks/useNavigate';
 import { addNotification } from '@desktop-client/notifications/notificationsSlice';
@@ -343,6 +344,15 @@ function AllocationSlider({
 }) {
   const { t } = useTranslation();
   const format = useFormat();
+  const [isEditingValue, setIsEditingValue] = useState(false);
+
+  function clampValue(nextValue: number) {
+    return Math.min(Math.max(0, nextValue), maxValue);
+  }
+
+  function updateFromInput(nextValue: number) {
+    onUpdate(clampValue(nextValue));
+  }
 
   return (
     <View style={{ gap: 6 }}>
@@ -353,32 +363,65 @@ function AllocationSlider({
         max={maxValue}
         step={1}
         value={value}
-        onChange={event => onUpdate(Number(event.target.value) || 0)}
+        onChange={event => updateFromInput(Number(event.target.value) || 0)}
         style={{
           width: '100%',
           margin: 0,
           accentColor: theme.buttonPrimaryBackground,
         }}
       />
-      {showSummary ? (
-        <View
-          style={{
-            gap: 8,
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-          }}
-        >
-          <FinancialText style={styles.tnum}>
-            {format(value, 'financial')}
-          </FinancialText>
+      <View
+        style={{
+          gap: 8,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
+        {isEditingValue ? (
+          <FinancialInput
+            aria-label={t('Edit {{label}} amount', { label })}
+            autoFocus
+            value={value}
+            onUpdate={nextValue => {
+              updateFromInput(nextValue);
+              setIsEditingValue(false);
+            }}
+            onEnter={nextValue => {
+              updateFromInput(nextValue);
+              setIsEditingValue(false);
+            }}
+            onEscape={() => setIsEditingValue(false)}
+            onBlur={() => setIsEditingValue(false)}
+            style={{
+              width: 110,
+              textAlign: 'right',
+            }}
+          />
+        ) : (
+          <Button
+            variant="bare"
+            aria-label={t('Edit {{label}} amount', { label })}
+            onPress={() => setIsEditingValue(true)}
+            style={{
+              padding: 0,
+              minWidth: 0,
+              color: theme.pageText,
+            }}
+          >
+            <FinancialText style={styles.tnum}>
+              {format(value, 'financial')}
+            </FinancialText>
+          </Button>
+        )}
+        {showSummary ? (
           <Text style={{ ...styles.smallText, color: theme.pageTextSubdued }}>
             {t('Max: {{amount}}', {
               amount: format(maxValue, 'financial'),
             })}
           </Text>
-        </View>
-      ) : null}
+        ) : null}
+      </View>
     </View>
   );
 }
