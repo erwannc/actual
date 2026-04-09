@@ -4,11 +4,11 @@ import * as Handlebars from 'handlebars';
 import { HyperFormula } from 'hyperformula';
 import enUS from 'hyperformula/i18n/languages/enUS';
 
+import { logger } from '#platform/server/log';
+import type { TransactionForRules } from '#server/transactions/transaction-rules';
+import { currentDay, format, parseDate } from '#shared/months';
+import { FIELD_TYPES } from '#shared/rules';
 import { amountToInteger } from '#shared/util';
-import { logger } from '../../platform/server/log';
-import { currentDay, format, parseDate } from '../../shared/months';
-import { FIELD_TYPES } from '../../shared/rules';
-import type { TransactionForRules } from '../transactions/transaction-rules';
 
 import {
   CustomFunctionsPlugin,
@@ -193,6 +193,39 @@ export class Action {
           case 'fixed-amount':
             object.amount = this.value;
             break;
+          case 'formula':
+            if (!object._ruleErrors) {
+              object._ruleErrors = [];
+            }
+            if (!this.options?.formula) {
+              object._ruleErrors.push(
+                'Formula method selected but no formula specified',
+              );
+              break;
+            }
+            try {
+              const result = this.executeFormulaSync(
+                this.options.formula,
+                object,
+              );
+              const numValue =
+                typeof result === 'number'
+                  ? result
+                  : parseFloat(String(result));
+
+              if (isNaN(numValue)) {
+                object._ruleErrors.push(
+                  `Formula for split amount must produce a numeric value. Got: ${JSON.stringify(result)}`,
+                );
+              } else {
+                object.amount = numValue;
+              }
+            } catch (err) {
+              object._ruleErrors.push(
+                `Error executing formula for split amount: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+            break;
           default:
             break;
         }
@@ -270,6 +303,7 @@ export class Action {
       hfInstance = HyperFormula.buildEmpty({
         licenseKey: 'gpl-v3',
         language: 'enUS',
+        dateFormats: ['DD/MM/YYYY', 'YYYY-MM-DD', 'YYYY/MM/DD'],
       });
 
       const sheetName = hfInstance.addSheet('Sheet1');
@@ -303,7 +337,6 @@ export class Action {
         }
         hfInstance.addNamedExpression(key, cellValue);
       }
-
       hfInstance.setCellContents({ sheet: sheetId, col: 0, row: 0 }, [
         [formula],
       ]);

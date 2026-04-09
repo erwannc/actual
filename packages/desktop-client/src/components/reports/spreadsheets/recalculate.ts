@@ -55,7 +55,7 @@ export function recalculate({
             (asset[groupByLabel] === (item.id ?? null) ||
               (item.uncategorized_id && groupsByCategory)),
         )
-        .reduce((a, v) => (a = a + v.amount), 0);
+        .reduce((a, v) => a + v.amount, 0);
       totalAssets += intervalAssets;
 
       const intervalDebts = filterHiddenItems(
@@ -72,7 +72,7 @@ export function recalculate({
             (debt[groupByLabel] === (item.id ?? null) ||
               (item.uncategorized_id && groupsByCategory)),
         )
-        .reduce((a, v) => (a = a + v.amount), 0);
+        .reduce((a, v) => a + v.amount, 0);
       totalDebts += intervalDebts;
 
       const intervalTotals = intervalAssets + intervalDebts;
@@ -85,6 +85,7 @@ export function recalculate({
         netAssets: intervalTotals > 0 ? intervalTotals : 0,
         netDebts: intervalTotals < 0 ? intervalTotals : 0,
         totalTotals: intervalTotals,
+        totalBudgeted: intervalTotals,
         change,
         intervalStartDate: index === 0 ? startDate : intervalItem,
         intervalEndDate:
@@ -108,6 +109,7 @@ export function recalculate({
     netAssets: totalTotals > 0 ? totalTotals : 0,
     netDebts: totalTotals < 0 ? totalTotals : 0,
     totalTotals,
+    totalBudgeted: totalTotals,
     intervalData,
   };
 }

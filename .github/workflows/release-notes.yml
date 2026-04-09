@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
       - name: Get changed files
@@ -30,7 +30,7 @@ jobs:
           fi
       - name: Check release notes
         if: startsWith(github.head_ref, 'release/') == false && steps.changed-files.outputs.only_docs != 'true'
-        uses: actualbudget/actions/release-notes/check@main
+        uses: ./.github/actions/release-notes/check
       - name: Generate release notes
         if: startsWith(github.head_ref, 'release/') == true
-        uses: actualbudget/actions/release-notes/generate@main
+        uses: ./.github/actions/release-notes/generate
