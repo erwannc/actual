@@ -42,12 +42,14 @@ import {
   PageHeader,
 } from '@desktop-client/components/Page';
 import { LoadingIndicator } from '@desktop-client/components/reports/LoadingIndicator';
-import { FinancialInput } from '@desktop-client/components/util/FinancialInput';
 import { useFormat } from '@desktop-client/hooks/useFormat';
 import { useNavigate } from '@desktop-client/hooks/useNavigate';
 import { addNotification } from '@desktop-client/notifications/notificationsSlice';
 import { useDispatch } from '@desktop-client/redux';
 import { fundsLocationQueries } from '@desktop-client/reports';
+
+import { AllocationSlider } from './FundsLocationAllocationSlider';
+import { MobileFundsLocationPage } from './FundsLocationMobilePage';
 
 type DraftAllocationMap = Record<string, FundsLocationAllocationInput>;
 
@@ -88,6 +90,7 @@ type CategoryDialogState = {
   defaultOrder: string[];
   sortColumn: DialogSortColumn;
   sortDirection: DialogSortDirection;
+  maxAvailableOrder?: string[];
 };
 type ReportSortState = {
   column: ReportSortColumn;
@@ -329,103 +332,6 @@ function getAllocationSliderMax({
   );
 }
 
-function AllocationSlider({
-  label,
-  value,
-  maxValue,
-  onUpdate,
-  showSummary = true,
-}: {
-  label: string;
-  value: number;
-  maxValue: number;
-  onUpdate: (value: number) => void;
-  showSummary?: boolean;
-}) {
-  const { t } = useTranslation();
-  const format = useFormat();
-  const [isEditingValue, setIsEditingValue] = useState(false);
-
-  function clampValue(nextValue: number) {
-    return Math.min(Math.max(0, nextValue), maxValue);
-  }
-
-  function updateFromInput(nextValue: number) {
-    onUpdate(clampValue(nextValue));
-  }
-
-  return (
-    <View style={{ gap: 6 }}>
-      <input
-        aria-label={label}
-        type="range"
-        min={0}
-        max={maxValue}
-        step={1}
-        value={value}
-        onChange={event => updateFromInput(Number(event.target.value) || 0)}
-        style={{
-          width: '100%',
-          margin: 0,
-          accentColor: theme.buttonPrimaryBackground,
-        }}
-      />
-      <View
-        style={{
-          gap: 8,
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
-        {isEditingValue ? (
-          <FinancialInput
-            aria-label={t('Edit {{label}} amount', { label })}
-            autoFocus
-            value={value}
-            onUpdate={nextValue => {
-              updateFromInput(nextValue);
-              setIsEditingValue(false);
-            }}
-            onEnter={nextValue => {
-              updateFromInput(nextValue);
-              setIsEditingValue(false);
-            }}
-            onEscape={() => setIsEditingValue(false)}
-            onBlur={() => setIsEditingValue(false)}
-            style={{
-              width: 110,
-              textAlign: 'right',
-            }}
-          />
-        ) : (
-          <Button
-            variant="bare"
-            aria-label={t('Edit {{label}} amount', { label })}
-            onPress={() => setIsEditingValue(true)}
-            style={{
-              padding: 0,
-              minWidth: 0,
-              color: theme.pageText,
-            }}
-          >
-            <FinancialText style={styles.tnum}>
-              {format(value, 'financial')}
-            </FinancialText>
-          </Button>
-        )}
-        {showSummary ? (
-          <Text style={{ ...styles.smallText, color: theme.pageTextSubdued }}>
-            {t('Max: {{amount}}', {
-              amount: format(maxValue, 'financial'),
-            })}
-          </Text>
-        ) : null}
-      </View>
-    </View>
-  );
-}
-
 function getDraftAllocationAmount(
   draftAllocations: DraftAllocationMap,
   categoryId: string,
@@ -534,6 +440,53 @@ function getInitialDialogAccountOrder({
       return left.name.localeCompare(right.name);
     })
     .map(account => account.id);
+}
+
+function getDialogMaxAvailableOrder({
+  editableAccounts,
+  categoryId,
+  allocations,
+  draftAllocations,
+  categoryRemainder,
+  sortDirection,
+}: {
+  editableAccounts: Array<{ id: string; name: string; balance: number; remainder: number }>;
+  categoryId: string;
+  allocations: Record<string, number>;
+  draftAllocations: DraftAllocationMap;
+  categoryRemainder: number;
+  sortDirection: DialogSortDirection;
+}) {
+  const direction = sortDirection === 'asc' ? 1 : -1;
+
+  return editableAccounts
+    .map(account => {
+      const value = allocations[account.id] ?? 0;
+      const globalValue = getDraftAllocationAmount(
+        draftAllocations,
+        categoryId,
+        account.id,
+      );
+      const accountRemainder = account.remainder + globalValue - value;
+
+      return {
+        accountId: account.id,
+        accountName: account.name,
+        maxValue: getAllocationSliderMax({
+          currentValue: value,
+          categoryRemainder,
+          accountRemainder,
+        }),
+      };
+    })
+    .sort((left, right) => {
+      const comparison = (left.maxValue - right.maxValue) * direction;
+
+      return (
+        comparison || left.accountName.localeCompare(right.accountName)
+      );
+    })
+    .map(row => row.accountId);
 }
 
 function getDefaultDialogSortDirection(column: DialogSortColumn) {
@@ -924,7 +877,7 @@ export function FundsLocation() {
     };
 
   useLayoutEffect(() => {
-    if (!displayData) {
+    if (!displayData || isNarrowWidth) {
       return;
     }
 
@@ -1001,6 +954,18 @@ export function FundsLocation() {
     ) =>
       (defaultOrderIndex.get(leftAccountId) ?? Number.MAX_SAFE_INTEGER) -
       (defaultOrderIndex.get(rightAccountId) ?? Number.MAX_SAFE_INTEGER);
+    const maxAvailableOrderIndex = new Map(
+      (categoryDialogState.maxAvailableOrder ?? []).map((accountId, index) => [
+        accountId,
+        index,
+      ]),
+    );
+    const compareByMaxAvailableOrder = (
+      leftAccountId: string,
+      rightAccountId: string,
+    ) =>
+      (maxAvailableOrderIndex.get(leftAccountId) ?? Number.MAX_SAFE_INTEGER) -
+      (maxAvailableOrderIndex.get(rightAccountId) ?? Number.MAX_SAFE_INTEGER);
 
     return displayData.editableAccounts
       .map(account => {
@@ -1041,6 +1006,16 @@ export function FundsLocation() {
           case 'currentAllocation':
           case 'maxAvailable':
           case 'allocation': {
+            if (
+              categoryDialogState.sortColumn === 'maxAvailable' &&
+              categoryDialogState.maxAvailableOrder
+            ) {
+              return (
+                compareByMaxAvailableOrder(left.account.id, right.account.id) ||
+                compareByDefaultOrder(left.account.id, right.account.id)
+              );
+            }
+
             const direction =
               categoryDialogState.sortDirection === 'asc' ? 1 : -1;
             const leftValue =
@@ -1123,6 +1098,7 @@ export function FundsLocation() {
       }),
       sortColumn: 'default',
       sortDirection: getDefaultDialogSortDirection('default'),
+      maxAvailableOrder: undefined,
     });
     setDialogSearch('');
   };
@@ -1157,6 +1133,7 @@ export function FundsLocation() {
           ...current,
           sortColumn: 'default',
           sortDirection: getDefaultDialogSortDirection('default'),
+          maxAvailableOrder: undefined,
         };
       }
 
@@ -1167,10 +1144,25 @@ export function FundsLocation() {
             : 'asc'
           : getDefaultDialogSortDirection(column);
 
+      const nextMaxAvailableOrder =
+        column === 'maxAvailable' &&
+        displayData &&
+        selectedDialogCategory
+          ? getDialogMaxAvailableOrder({
+              editableAccounts: displayData.editableAccounts,
+              categoryId: selectedDialogCategory.id,
+              allocations: current.allocations,
+              draftAllocations,
+              categoryRemainder: dialogRemainder,
+              sortDirection: nextDirection,
+            })
+          : undefined;
+
       return {
         ...current,
         sortColumn: column,
         sortDirection: nextDirection,
+        maxAvailableOrder: nextMaxAvailableOrder,
       };
     });
   };
@@ -1331,6 +1323,73 @@ export function FundsLocation() {
     <PageHeader title={t('Funds Location')} />
   );
 
+  const clearSavedMonthDisabled =
+    saveMutation.isPending ||
+    !currentMonthData.hasSavedSnapshot ||
+    currentMonthData.allocations.length === 0;
+  const saveAllocationsDisabled = saveMutation.isPending || !isDirty;
+  const editableAccountRemainder = displayData.editableAccounts.reduce(
+    (sum, account) => sum + account.remainder,
+    0,
+  );
+
+  if (isNarrowWidth) {
+    return (
+      <Page header={header} padding={0}>
+        <MobileFundsLocationPage
+          selectedMonth={selectedMonth}
+          monthBounds={monthBounds}
+          clearDisabled={clearSavedMonthDisabled}
+          saveDisabled={saveAllocationsDisabled}
+          supported={displayData.supported}
+          totalCategoriesCount={displayData.categories.length}
+          selectedCategory={
+            selectedDialogCategory
+              ? {
+                  id: selectedDialogCategory.id,
+                  name: selectedDialogCategory.name,
+                  balance: selectedDialogCategory.balance,
+                }
+              : null
+          }
+          categoryRows={filteredSortedCategoryRows}
+          groupFilter={groupFilter}
+          categoryFilter={categoryFilter}
+          groupFilterOptions={groupFilterOptions}
+          totals={{
+            categoryBalance: displayData.totals.categoryBalance,
+            categoryAllocated: displayData.totals.categoryAllocated,
+            categoryRemainder: displayData.totals.categoryRemainder,
+            editableAccountRemainder,
+          }}
+          accountWarningCount={accountWarningCount}
+          dialogAllocatedTotal={dialogAllocatedTotal}
+          dialogRemainder={dialogRemainder}
+          dialogSearch={dialogSearch}
+          showDialogSearch={
+            displayData.editableAccounts.length > ACCOUNT_SEARCH_THRESHOLD
+          }
+          dialogAccountRows={dialogAccountRows}
+          onSelectMonth={setSelectedMonth}
+          onClearSavedMonth={() => saveMutation.mutate([])}
+          onSave={() => saveMutation.mutate(toDraftAllocationArray(draftAllocations))}
+          onChangeGroupFilter={setGroupFilter}
+          onChangeCategoryFilter={setCategoryFilter}
+          onClearFilters={() => {
+            setGroupFilter('');
+            setCategoryFilter('');
+          }}
+          onOpenCategory={openCategoryDialog}
+          onChangeDialogSearch={setDialogSearch}
+          onUpdateDialogAllocation={updateDialogAllocation}
+          onClearDialogRow={clearDialogRow}
+          onCloseCategoryDialog={closeCategoryDialog}
+          onApplyDialogAllocations={applyDialogAllocations}
+        />
+      </Page>
+    );
+  }
+
   const stickyOffsets = {
     group: 0,
     category: stickyColumnWidths.group,
@@ -1396,18 +1455,14 @@ export function FundsLocation() {
               }}
             >
               <Button
-                isDisabled={
-                  saveMutation.isPending ||
-                  !currentMonthData.hasSavedSnapshot ||
-                  currentMonthData.allocations.length === 0
-                }
+                isDisabled={clearSavedMonthDisabled}
                 onPress={() => saveMutation.mutate([])}
               >
                 <Trans>Clear saved month</Trans>
               </Button>
               <Button
                 variant="primary"
-                isDisabled={saveMutation.isPending || !isDirty}
+                isDisabled={saveAllocationsDisabled}
                 onPress={() =>
                   saveMutation.mutate(toDraftAllocationArray(draftAllocations))
                 }
@@ -1459,10 +1514,7 @@ export function FundsLocation() {
                 />
                 <SummaryStat
                   label={t('Editable account remainder')}
-                  value={displayData.editableAccounts.reduce(
-                    (sum, account) => sum + account.remainder,
-                    0,
-                  )}
+                  value={editableAccountRemainder}
                   tone={accountWarningCount === 0 ? 'default' : 'warning'}
                 />
               </View>
