@@ -343,12 +343,14 @@ function UsageSummaryCard({
   balance,
   remainder,
   note,
+  onNotePress,
 }: {
   label: string;
   allocated: number;
   balance: number;
   remainder: number;
   note?: React.ReactNode;
+  onNotePress?: () => void;
 }) {
   return (
     <Block
@@ -380,14 +382,36 @@ function UsageSummaryCard({
         />
 
         {note ? (
-          <Text
-            style={{
-              ...styles.smallText,
-              color: theme.pageTextSubdued,
-            }}
-          >
-            {note}
-          </Text>
+          onNotePress ? (
+            <Button
+              variant="bare"
+              onPress={onNotePress}
+              style={{
+                padding: 0,
+                minWidth: 0,
+                justifyContent: 'flex-start',
+                color: theme.pageTextSubdued,
+              }}
+            >
+              <Text
+                style={{
+                  ...styles.smallText,
+                  color: theme.pageTextSubdued,
+                }}
+              >
+                {note}
+              </Text>
+            </Button>
+          ) : (
+            <Text
+              style={{
+                ...styles.smallText,
+                color: theme.pageTextSubdued,
+              }}
+            >
+              {note}
+            </Text>
+          )
         ) : null}
       </View>
     </Block>
@@ -683,6 +707,7 @@ function AllocatedCategoriesSummary({
   allocations: Array<{
     categoryId: string;
     categoryName: string;
+    groupName: string;
     amount: number;
   }>;
   textColor: string;
@@ -694,7 +719,12 @@ function AllocatedCategoriesSummary({
     <CompactBreakdownSummary
       items={allocations.map(allocation => ({
         id: allocation.categoryId,
-        label: allocation.categoryName,
+        label: (
+          <>
+            {allocation.categoryName}{' '}
+            <span style={{ color: subduedColor }}>{allocation.groupName}</span>
+          </>
+        ),
         amount: allocation.amount,
       }))}
       emptyLabel="Unassigned"
@@ -971,9 +1001,7 @@ export function FundsLocation() {
     useState<FundsLocationReportView>('category');
   const [groupFilter, setGroupFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
-  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(
-    null,
-  );
+  const [accountFilter, setAccountFilter] = useState('');
   const [categoryDialogState, setCategoryDialogState] =
     useState<CategoryDialogState | null>(null);
   const [dialogSearch, setDialogSearch] = useState('');
@@ -1289,22 +1317,15 @@ export function FundsLocation() {
     });
   }, [accountRows, reportSort]);
 
-  useEffect(() => {
-    if (reportView !== 'account') {
-      return;
-    }
+  const filteredSortedAccountRows = useMemo(() => {
+    const normalizedAccountFilter = accountFilter.trim().toLocaleLowerCase();
 
-    if (accountRows.length === 0) {
-      if (selectedAccountId !== null) {
-        setSelectedAccountId(null);
-      }
-      return;
-    }
-
-    if (!accountRows.some(row => row.account.id === selectedAccountId)) {
-      setSelectedAccountId(accountRows[0].account.id);
-    }
-  }, [accountRows, reportView, selectedAccountId]);
+    return sortedAccountRows.filter(
+      row =>
+        normalizedAccountFilter === '' ||
+        row.account.name.toLocaleLowerCase().includes(normalizedAccountFilter),
+    );
+  }, [accountFilter, sortedAccountRows]);
 
   const saveMutation = useMutation<
     FundsLocationMonthEntity,
@@ -1382,17 +1403,6 @@ export function FundsLocation() {
       ) ?? null
     );
   }, [categoryDialogState, displayData]);
-
-  const selectedAccountRow = useMemo(() => {
-    if (!selectedAccountId) {
-      return null;
-    }
-
-    return (
-      accountRows.find(accountRow => accountRow.account.id === selectedAccountId) ??
-      null
-    );
-  }, [accountRows, selectedAccountId]);
 
   const dialogAllocatedTotal = useMemo(() => {
     if (!categoryDialogState) {
@@ -1666,6 +1676,15 @@ export function FundsLocation() {
     });
   };
 
+  const showAccountsNeedingReview = () => {
+    setReportView('account');
+    setAccountFilter('');
+    setReportSort({
+      column: 'remainder',
+      direction: 'desc',
+    });
+  };
+
   const clearDialogRow = () => {
     if (!displayData || !categoryDialogState) {
       return;
@@ -1843,11 +1862,13 @@ export function FundsLocation() {
   );
   const hasActiveCategoryFilters =
     groupFilter !== '' || categoryFilter.trim() !== '';
+  const hasActiveAccountFilter = accountFilter.trim() !== '';
 
   if (isNarrowWidth) {
     return (
       <Page header={header} padding={0}>
         <MobileFundsLocationPage
+          reportView={reportView}
           selectedMonth={selectedMonth}
           monthBounds={monthBounds}
           clearDisabled={clearSavedMonthDisabled}
@@ -1864,6 +1885,7 @@ export function FundsLocation() {
               : null
           }
           categoryRows={filteredSortedCategoryRows}
+          accountRows={sortedAccountRows}
           groupFilter={groupFilter}
           categoryFilter={categoryFilter}
           groupFilterOptions={groupFilterOptions}
@@ -1871,6 +1893,8 @@ export function FundsLocation() {
             categoryBalance: displayData.totals.categoryBalance,
             categoryAllocated: displayData.totals.categoryAllocated,
             categoryRemainder: displayData.totals.categoryRemainder,
+            accountBalance: displayData.totals.accountBalance,
+            accountAllocated: displayData.totals.accountAllocated,
             editableAccountRemainder,
           }}
           accountWarningCount={accountWarningCount}
@@ -1882,6 +1906,7 @@ export function FundsLocation() {
           }
           dialogAccountRows={dialogAccountRows}
           onSelectMonth={setSelectedMonth}
+          onChangeReportView={setReportView}
           onClearSavedMonth={() => saveMutation.mutate([])}
           onSave={() => saveMutation.mutate(toDraftAllocationArray(draftAllocations))}
           onChangeGroupFilter={setGroupFilter}
@@ -1926,18 +1951,23 @@ export function FundsLocation() {
       >
         <Trans>There are no editable accounts to inspect for this month.</Trans>
       </Block>
+    ) : filteredSortedAccountRows.length === 0 ? (
+      <Block
+        style={{
+          padding: 16,
+          border: `1px solid ${theme.pillBorder}`,
+        }}
+      >
+        <Trans>No accounts match the current filter.</Trans>
+      </Block>
     ) : (
       <View
         style={{
-          gap: 16,
-          flexDirection: 'row',
-          alignItems: 'stretch',
+          minWidth: 0,
         }}
       >
         <div
           style={{
-            flex: '1 1 0',
-            minWidth: 0,
             overflowX: 'auto',
             overflowY: 'auto',
             maxHeight: 'calc(100vh - 360px)',
@@ -1994,7 +2024,7 @@ export function FundsLocation() {
                     backgroundColor: theme.tableBackground,
                   }}
                 >
-                  {renderReportSortHeader(t('Usage'), 'allocated')}
+                  {renderReportSortHeader(t('Usage'), 'remainder')}
                 </th>
                 <th
                   style={{
@@ -2016,50 +2046,24 @@ export function FundsLocation() {
               </tr>
             </thead>
             <tbody>
-              {sortedAccountRows.map(accountRow => {
-                const isSelected = selectedAccountId === accountRow.account.id;
-                const rowBackground = isSelected
-                  ? theme.tableRowBackgroundHighlight
-                  : theme.tableBackground;
-                const rowTextColor = isSelected
-                  ? theme.tableRowBackgroundHighlightText
-                  : theme.pageText;
-
+              {filteredSortedAccountRows.map(accountRow => {
                 return (
                   <tr key={accountRow.account.id}>
                     <td
                       style={{
                         padding: 12,
                         borderBottom: `1px solid ${theme.tableBorder}`,
-                        backgroundColor: rowBackground,
-                        color: rowTextColor,
                       }}
                     >
-                      <Button
-                        variant="bare"
-                        aria-label={t('Show {{account}} details', {
-                          account: accountRow.account.name,
-                        })}
-                        onPress={() => setSelectedAccountId(accountRow.account.id)}
-                        style={{
-                          padding: 0,
-                          minWidth: 0,
-                          justifyContent: 'flex-start',
-                          color: 'inherit',
-                        }}
-                      >
-                        <Text style={{ fontWeight: 600 }}>
-                          {accountRow.account.name}
-                        </Text>
-                      </Button>
+                      <Text style={{ fontWeight: 600 }}>
+                        {accountRow.account.name}
+                      </Text>
                     </td>
                     <td
                       style={{
                         padding: 12,
                         textAlign: 'right',
                         borderBottom: `1px solid ${theme.tableBorder}`,
-                        backgroundColor: rowBackground,
-                        color: rowTextColor,
                         ...styles.tnum,
                       }}
                     >
@@ -2071,8 +2075,6 @@ export function FundsLocation() {
                       style={{
                         padding: 12,
                         borderBottom: `1px solid ${theme.tableBorder}`,
-                        backgroundColor: rowBackground,
-                        color: rowTextColor,
                         verticalAlign: 'top',
                       }}
                     >
@@ -2080,15 +2082,9 @@ export function FundsLocation() {
                         allocated={accountRow.account.allocated}
                         balance={accountRow.account.balance}
                         remainder={accountRow.account.remainder}
-                        textColor={rowTextColor}
-                        subduedColor={
-                          isSelected ? rowTextColor : theme.pageTextSubdued
-                        }
-                        trackColor={
-                          isSelected
-                            ? 'rgba(255, 255, 255, 0.2)'
-                            : theme.tableBorder
-                        }
+                        textColor={theme.pageText}
+                        subduedColor={theme.pageTextSubdued}
+                        trackColor={theme.tableBorder}
                       />
                     </td>
                     <td
@@ -2096,23 +2092,15 @@ export function FundsLocation() {
                         minWidth: 320,
                         padding: 12,
                         borderBottom: `1px solid ${theme.tableBorder}`,
-                        backgroundColor: rowBackground,
-                        color: rowTextColor,
                         verticalAlign: 'top',
                       }}
                     >
                       <AllocatedCategoriesSummary
                         allocations={accountRow.categoryAllocations}
-                        textColor={rowTextColor}
-                        subduedColor={
-                          isSelected ? rowTextColor : theme.pageTextSubdued
-                        }
-                        trackColor={
-                          isSelected
-                            ? 'rgba(255, 255, 255, 0.2)'
-                            : theme.tableBorder
-                        }
-                        separatorColor={rowBackground}
+                        textColor={theme.pageText}
+                        subduedColor={theme.pageTextSubdued}
+                        trackColor={theme.tableBorder}
+                        separatorColor={theme.tableBackground}
                       />
                     </td>
                   </tr>
@@ -2121,188 +2109,6 @@ export function FundsLocation() {
             </tbody>
           </table>
         </div>
-
-        <Block
-          style={{
-            flex: '0 0 320px',
-            width: 320,
-            padding: 16,
-            alignSelf: 'stretch',
-            backgroundColor: theme.tableBackground,
-            boxShadow: '0 1px 4px rgba(0, 0, 0, 0.08)',
-          }}
-          data-testid="funds-location-account-detail"
-        >
-          {selectedAccountRow ? (
-            <View style={{ gap: 16 }}>
-              <View style={{ gap: 4 }}>
-                <Text
-                  style={{
-                    ...styles.smallText,
-                    color: theme.pageTextSubdued,
-                  }}
-                >
-                  <Trans>Selected account</Trans>
-                </Text>
-                <Text style={{ ...styles.mediumText, fontWeight: 600 }}>
-                  {selectedAccountRow.account.name}
-                </Text>
-              </View>
-
-              <Block
-                style={{
-                  padding: 12,
-                  border: `1px solid ${theme.tableBorder}`,
-                  backgroundColor: theme.tableBackground,
-                }}
-              >
-                <View style={{ gap: 8 }}>
-                  <View
-                    style={{
-                      gap: 8,
-                      flexDirection: 'row',
-                      justifyContent: 'space-between',
-                    }}
-                  >
-                    <Text
-                      style={{
-                        ...styles.smallText,
-                        color: theme.pageTextSubdued,
-                      }}
-                    >
-                      <Trans>Balance</Trans>
-                    </Text>
-                    <FinancialText style={styles.tnum}>
-                      {format(selectedAccountRow.account.balance, 'financial')}
-                    </FinancialText>
-                  </View>
-                  <View
-                    style={{
-                      gap: 8,
-                      flexDirection: 'row',
-                      justifyContent: 'space-between',
-                    }}
-                  >
-                    <Text
-                      style={{
-                        ...styles.smallText,
-                        color: theme.pageTextSubdued,
-                      }}
-                    >
-                      <Trans>Allocated total</Trans>
-                    </Text>
-                    <FinancialText style={styles.tnum}>
-                      {format(selectedAccountRow.account.allocated, 'financial')}
-                    </FinancialText>
-                  </View>
-                  <View
-                    style={{
-                      gap: 8,
-                      flexDirection: 'row',
-                      justifyContent: 'space-between',
-                    }}
-                  >
-                    <Text
-                      style={{
-                        ...styles.smallText,
-                        color: theme.pageTextSubdued,
-                      }}
-                    >
-                      <Trans>Remainder</Trans>
-                    </Text>
-                    <FinancialText
-                      style={{
-                        ...styles.tnum,
-                        color:
-                          selectedAccountRow.account.remainder === 0
-                            ? theme.pageText
-                            : theme.noticeText,
-                      }}
-                    >
-                      {format(selectedAccountRow.account.remainder, 'financial')}
-                    </FinancialText>
-                  </View>
-                </View>
-              </Block>
-
-              <View style={{ gap: 8 }}>
-                <Text
-                  style={{
-                    ...styles.smallText,
-                    color: theme.pageTextSubdued,
-                  }}
-                >
-                  <Trans>Allocated categories</Trans>
-                </Text>
-
-                {selectedAccountRow.categoryAllocations.length > 0 ? (
-                  <View
-                    style={{
-                      gap: 10,
-                      maxHeight: 'calc(100vh - 520px)',
-                      overflowY: 'auto',
-                    }}
-                  >
-                    {selectedAccountRow.categoryAllocations.map(allocation => (
-                      <Block
-                        key={`${selectedAccountRow.account.id}-${allocation.categoryId}`}
-                        style={{
-                          padding: 12,
-                          border: `1px solid ${theme.tableBorder}`,
-                          backgroundColor: theme.tableBackground,
-                        }}
-                      >
-                        <View style={{ gap: 6 }}>
-                          <View
-                            style={{
-                              gap: 8,
-                              flexDirection: 'row',
-                              justifyContent: 'space-between',
-                              alignItems: 'baseline',
-                            }}
-                          >
-                            <Text style={{ fontWeight: 600 }}>
-                              {allocation.categoryName}
-                            </Text>
-                            <FinancialText style={styles.tnum}>
-                              {format(allocation.amount, 'financial')}
-                            </FinancialText>
-                          </View>
-                          <Text
-                            style={{
-                              ...styles.smallText,
-                              color: theme.pageTextSubdued,
-                            }}
-                          >
-                            {allocation.groupName}
-                          </Text>
-                        </View>
-                      </Block>
-                    ))}
-                  </View>
-                ) : (
-                  <Block
-                    style={{
-                      padding: 12,
-                      border: `1px solid ${theme.tableBorder}`,
-                      backgroundColor: theme.tableBackground,
-                    }}
-                  >
-                    <Text style={{ color: theme.pageTextSubdued }}>
-                      <Trans>
-                        No categories are currently allocated to this account.
-                      </Trans>
-                    </Text>
-                  </Block>
-                )}
-              </View>
-            </View>
-          ) : (
-            <Text style={{ color: theme.pageTextSubdued }}>
-              <Trans>Select an account to view its allocated categories.</Trans>
-            </Text>
-          )}
-        </Block>
       </View>
     );
   const categoryReportContent =
@@ -2411,7 +2217,7 @@ export function FundsLocation() {
                     backgroundColor: theme.tableBackground,
                   }}
                 >
-                  {renderReportSortHeader(t('Usage'), 'allocated')}
+                  {renderReportSortHeader(t('Usage'), 'remainder')}
                 </th>
                 {isHighAccountCount ? (
                   <>
@@ -2803,6 +2609,11 @@ export function FundsLocation() {
                     allocated={displayData.totals.accountAllocated}
                     balance={displayData.totals.accountBalance}
                     remainder={editableAccountRemainder}
+                    onNotePress={
+                      accountWarningCount > 0
+                        ? showAccountsNeedingReview
+                        : undefined
+                    }
                     note={
                       accountWarningCount > 0 ? (
                         <Trans>
@@ -2817,33 +2628,97 @@ export function FundsLocation() {
                 {reportView === 'account' ? (
                   <View
                     style={{
-                      gap: 8,
-                      flexDirection: 'row',
-                      flexWrap: 'wrap',
-                      alignItems: 'center',
+                      gap: 12,
+                      paddingTop: 10,
                     }}
                   >
-                    <Text
+                    <View
                       style={{
-                        ...styles.smallText,
-                        color: theme.pageTextSubdued,
+                        gap: 12,
+                        flexDirection: 'row',
+                        alignItems: 'center',
                       }}
                     >
-                      <Trans>View</Trans>
-                    </Text>
-                    <View style={{ gap: 8, flexDirection: 'row' }}>
-                      <Button
-                        variant="menu"
-                        onPress={() => setReportView('category')}
+                      <View
+                        style={{
+                          gap: 8,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          flex: '0 0 auto',
+                        }}
                       >
-                        <Trans>By category</Trans>
-                      </Button>
-                      <Button
-                        variant="menuSelected"
-                        onPress={() => setReportView('account')}
+                        <Text
+                          style={{
+                            ...styles.smallText,
+                            color: theme.pageTextSubdued,
+                          }}
+                        >
+                          <Trans>View</Trans>
+                        </Text>
+                        <View style={{ gap: 8, flexDirection: 'row' }}>
+                          <Button
+                            variant="menu"
+                            onPress={() => setReportView('category')}
+                          >
+                            <Trans>By category</Trans>
+                          </Button>
+                          <Button
+                            variant="menuSelected"
+                            onPress={() => setReportView('account')}
+                          >
+                            <Trans>By account</Trans>
+                          </Button>
+                        </View>
+                      </View>
+
+                      <View
+                        style={{
+                          gap: 8,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          flex: 1,
+                        }}
                       >
-                        <Trans>By account</Trans>
-                      </Button>
+                        <Text
+                          style={{
+                            ...styles.smallText,
+                            color: theme.pageTextSubdued,
+                            flex: '0 0 auto',
+                          }}
+                        >
+                          <Trans>Filter by account</Trans>
+                        </Text>
+                        <View style={{ flex: 1 }}>
+                          <Search
+                            value={accountFilter}
+                            onChange={setAccountFilter}
+                            placeholder={t('Filter accounts')}
+                            width="100%"
+                          />
+                        </View>
+                      </View>
+
+                      {hasActiveAccountFilter ? (
+                        <View
+                          style={{
+                            gap: 6,
+                            flex: '0 0 auto',
+                          }}
+                        >
+                          <Text
+                            style={{
+                              ...styles.smallText,
+                              color: 'transparent',
+                              userSelect: 'none',
+                            }}
+                          >
+                            <Trans>Filter by account</Trans>
+                          </Text>
+                          <Button onPress={() => setAccountFilter('')}>
+                            <Trans>Clear filters</Trans>
+                          </Button>
+                        </View>
+                      ) : null}
                     </View>
                   </View>
                 ) : null}

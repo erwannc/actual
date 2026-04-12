@@ -451,35 +451,65 @@ describe('FundsLocation', () => {
     const accountTable = await screen.findByTestId(
       'funds-location-account-table',
     );
-    const detailPanel = screen.getByTestId('funds-location-account-detail');
 
     expect(accountTable).toHaveTextContent('Checking');
     expect(accountTable).toHaveTextContent('Savings');
     expect(accountTable).toHaveTextContent('Food');
     expect(accountTable).toHaveTextContent('Utilities');
-    expect(within(detailPanel).getByText('Checking')).toBeInTheDocument();
-    expect(within(detailPanel).getByText('Food')).toBeInTheDocument();
-    expect(within(detailPanel).getAllByText('3000').length).toBeGreaterThan(0);
+    expect(screen.queryByTestId('funds-location-account-detail')).not.toBeInTheDocument();
   });
 
-  test('account detail panel updates when selecting another account', async () => {
+  test('account view no longer renders a selected-account detail panel', async () => {
     renderFundsLocation();
 
     await screen.findByTestId('funds-location-table');
 
     fireEvent.click(screen.getByRole('button', { name: 'By account' }));
+
+    await screen.findByTestId('funds-location-account-table');
+
+    expect(screen.queryByTestId('funds-location-account-detail')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show Savings details' })).not.toBeInTheDocument();
+  });
+
+  test('filters the account view by account name', async () => {
+    renderFundsLocation();
+
+    await screen.findByTestId('funds-location-table');
+
+    fireEvent.click(screen.getByRole('button', { name: 'By account' }));
+
+    const accountTable = await screen.findByTestId(
+      'funds-location-account-table',
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('Filter accounts'), {
+      target: { value: 'sav' },
+    });
+
+    await waitFor(() => {
+      expect(accountTable).toHaveTextContent('Savings');
+    });
+
+    expect(accountTable).not.toHaveTextContent('Checking');
+  });
+
+  test('accounts needing review note switches to account view sorted by usage descending', async () => {
+    renderFundsLocation();
+
+    await screen.findByTestId('funds-location-table');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Balance' }));
+
     fireEvent.click(
-      screen.getByRole('button', { name: 'Show Savings details' }),
+      screen.getByRole('button', { name: /accounts need review/i }),
     );
 
-    const detailPanel = await screen.findByTestId(
-      'funds-location-account-detail',
-    );
+    await screen.findByTestId('funds-location-account-table');
 
-    expect(within(detailPanel).getByText('Savings')).toBeInTheDocument();
-    expect(within(detailPanel).getByText('Utilities')).toBeInTheDocument();
-    expect(within(detailPanel).getAllByText('1200').length).toBeGreaterThan(0);
-    expect(within(detailPanel).queryByText('Food')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Usage (descending)' }),
+    ).toBeInTheDocument();
   });
 
   test('allocated categories summary can expand hidden categories in account view', async () => {

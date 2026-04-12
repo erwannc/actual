@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 
 import { Block } from '@actual-app/components/block';
@@ -36,6 +36,21 @@ type MobileCategoryRow = {
   }>;
 };
 
+type MobileAccountRow = {
+  account: {
+    id: string;
+    name: string;
+    balance: number;
+    allocated: number;
+    remainder: number;
+  };
+  categoryAllocations: Array<{
+    categoryId: string;
+    categoryName: string;
+    amount: number;
+  }>;
+};
+
 type MobileDialogRow = {
   account: {
     id: string;
@@ -53,6 +68,7 @@ type MobileSelectedCategory = {
 };
 
 type MobileFundsLocationPageProps = {
+  reportView: 'category' | 'account';
   selectedMonth: string;
   monthBounds: { start: string; end: string };
   clearDisabled: boolean;
@@ -61,6 +77,7 @@ type MobileFundsLocationPageProps = {
   totalCategoriesCount: number;
   selectedCategory: MobileSelectedCategory | null;
   categoryRows: MobileCategoryRow[];
+  accountRows: MobileAccountRow[];
   groupFilter: string;
   categoryFilter: string;
   groupFilterOptions: string[];
@@ -68,6 +85,8 @@ type MobileFundsLocationPageProps = {
     categoryBalance: number;
     categoryAllocated: number;
     categoryRemainder: number;
+    accountBalance: number;
+    accountAllocated: number;
     editableAccountRemainder: number;
   };
   accountWarningCount: number;
@@ -77,6 +96,7 @@ type MobileFundsLocationPageProps = {
   showDialogSearch: boolean;
   dialogAccountRows: MobileDialogRow[];
   onSelectMonth: (month: string) => void;
+  onChangeReportView: (view: 'category' | 'account') => void;
   onClearSavedMonth: () => void;
   onSave: () => void;
   onChangeGroupFilter: (value: string) => void;
@@ -90,46 +110,17 @@ type MobileFundsLocationPageProps = {
   onApplyDialogAllocations: () => void;
 };
 
-function getToneColor(tone: 'default' | 'warning' | 'danger' = 'default') {
-  if (tone === 'warning') {
-    return theme.noticeText;
+function getBreakdownOpacity(index: number) {
+  switch (index) {
+    case 0:
+      return 1;
+    case 1:
+      return 0.78;
+    case 2:
+      return 0.58;
+    default:
+      return 0.36;
   }
-
-  if (tone === 'danger') {
-    return theme.errorText;
-  }
-
-  return theme.pageText;
-}
-
-function MobileSummaryMetric({
-  label,
-  value,
-  tone = 'default',
-}: {
-  label: string;
-  value: number;
-  tone?: 'default' | 'warning' | 'danger';
-}) {
-  const format = useFormat();
-
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'baseline',
-        justifyContent: 'space-between',
-        gap: 12,
-      }}
-    >
-      <Text style={{ ...styles.smallText, color: theme.pageTextSubdued }}>
-        {label}
-      </Text>
-      <FinancialText style={{ ...styles.tnum, color: getToneColor(tone) }}>
-        {format(value, 'financial')}
-      </FinancialText>
-    </View>
-  );
 }
 
 function getUsageColor({
@@ -160,6 +151,7 @@ function MobileUsageSummary({
   allocated,
   balance,
   remainder,
+  showLabel = true,
   trackColor = theme.tableBorder,
   subduedColor = theme.pageTextSubdued,
   textColor = theme.pageText,
@@ -167,6 +159,7 @@ function MobileUsageSummary({
   allocated: number;
   balance: number;
   remainder: number;
+  showLabel?: boolean;
   trackColor?: string;
   subduedColor?: string;
   textColor?: string;
@@ -178,9 +171,11 @@ function MobileUsageSummary({
 
   return (
     <View style={{ gap: 8 }}>
-      <Text style={{ ...styles.smallText, color: theme.pageTextSubdued }}>
-        <Trans>Usage</Trans>
-      </Text>
+      {showLabel ? (
+        <Text style={{ ...styles.smallText, color: theme.pageTextSubdued }}>
+          <Trans>Usage</Trans>
+        </Text>
+      ) : null}
 
       <View
         style={{
@@ -190,7 +185,9 @@ function MobileUsageSummary({
           ...styles.tnum,
         }}
       >
-        <FinancialText>{format(allocated, 'financial')}</FinancialText>
+        <FinancialText style={{ color: textColor }}>
+          {format(allocated, 'financial')}
+        </FinancialText>
         <Text style={{ color: subduedColor }}>/</Text>
         <FinancialText style={{ color: subduedColor }}>
           {format(balance, 'financial')}
@@ -239,6 +236,303 @@ function MobileUsageSummary({
   );
 }
 
+function MobileUsageSection({
+  label,
+  allocated,
+  balance,
+  remainder,
+  note,
+}: {
+  label: string;
+  allocated: number;
+  balance: number;
+  remainder: number;
+  note?: React.ReactNode;
+}) {
+  return (
+    <View style={{ gap: 8, minWidth: 0 }}>
+      <Text style={{ ...styles.smallText, color: theme.pageTextSubdued }}>
+        {label}
+      </Text>
+
+      <MobileUsageSummary
+        allocated={allocated}
+        balance={balance}
+        remainder={remainder}
+        showLabel={false}
+      />
+
+      {note ? (
+        <Text
+          style={{
+            ...styles.smallText,
+            color: theme.pageTextSubdued,
+            overflowWrap: 'anywhere',
+          }}
+        >
+          {note}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+function MobileSummaryBlock({
+  summary,
+}: {
+  summary: {
+    label: string;
+    allocated: number;
+    balance: number;
+    remainder: number;
+    note?: React.ReactNode;
+  };
+}) {
+  return (
+    <Block
+      style={{
+        boxSizing: 'border-box',
+        minWidth: 0,
+        padding: 12,
+        border: `1px solid ${theme.tableBorder}`,
+        backgroundColor: theme.tableBackground,
+      }}
+    >
+      <View style={{ minWidth: 0 }}>
+        <MobileUsageSection
+          label={summary.label}
+          allocated={summary.allocated}
+          balance={summary.balance}
+          remainder={summary.remainder}
+          note={summary.note}
+        />
+      </View>
+    </Block>
+  );
+}
+
+function MobileBreakdownSummary({
+  label,
+  items,
+  emptyLabel,
+  textColor = theme.pageText,
+  subduedColor = theme.pageTextSubdued,
+  trackColor = theme.tableBorder,
+  separatorColor = theme.tableBackground,
+}: {
+  label: string;
+  items: Array<{
+    id: string;
+    label: string;
+    amount: number;
+  }>;
+  emptyLabel: string;
+  textColor?: string;
+  subduedColor?: string;
+  trackColor?: string;
+  separatorColor?: string;
+}) {
+  const format = useFormat();
+  const { t } = useTranslation();
+  const [isExpanded, setIsExpanded] = useState(false);
+  const total = items.reduce((sum, item) => sum + item.amount, 0);
+  const collapsedVisibleCount = 2;
+  const visibleItems = isExpanded ? items : items.slice(0, collapsedVisibleCount);
+  const hiddenCount = Math.max(0, items.length - collapsedVisibleCount);
+
+  return (
+    <View style={{ gap: 8 }}>
+      <Text style={{ ...styles.smallText, color: subduedColor }}>{label}</Text>
+
+      {items.length === 0 || total <= 0 ? (
+        <Text style={{ color: subduedColor }}>{emptyLabel}</Text>
+      ) : (
+        <>
+          <div
+            aria-hidden="true"
+            style={{
+              display: 'flex',
+              height: 8,
+              width: '100%',
+              overflow: 'hidden',
+              borderRadius: 999,
+              backgroundColor: trackColor,
+            }}
+          >
+            {items.map((item, index) => (
+              <div
+                key={`${item.id}-segment`}
+                style={{
+                  width: `${(item.amount / total) * 100}%`,
+                  minWidth: 0,
+                  backgroundColor: theme.reportsBlue,
+                  opacity: getBreakdownOpacity(index),
+                  borderRight:
+                    index < items.length - 1
+                      ? `1px solid ${separatorColor}`
+                      : undefined,
+                }}
+              />
+            ))}
+          </div>
+
+          <View style={{ gap: 5 }}>
+            {visibleItems.map((item, index) => (
+              <View key={item.id} style={{ gap: 3 }}>
+                <View
+                  style={{
+                    gap: 8,
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'baseline',
+                  }}
+                >
+                  <Text style={{ color: textColor }}>{item.label}</Text>
+                  <FinancialText style={{ ...styles.tnum, color: textColor }}>
+                    {format(item.amount, 'financial')}
+                  </FinancialText>
+                </View>
+
+                <div
+                  aria-hidden="true"
+                  style={{
+                    height: 4,
+                    width: '100%',
+                    overflow: 'hidden',
+                    borderRadius: 999,
+                    backgroundColor: trackColor,
+                  }}
+                >
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${(item.amount / total) * 100}%`,
+                      borderRadius: 999,
+                      backgroundColor: theme.reportsBlue,
+                      opacity: getBreakdownOpacity(index),
+                    }}
+                  />
+                </div>
+              </View>
+            ))}
+
+            {hiddenCount > 0 ? (
+              <Button
+                variant="bare"
+                onPress={() => setIsExpanded(current => !current)}
+                style={{
+                  minWidth: 0,
+                  justifyContent: 'flex-start',
+                  padding: 0,
+                  color: subduedColor,
+                }}
+              >
+                <Text style={{ ...styles.smallText, color: subduedColor }}>
+                  {isExpanded
+                    ? t('Show less')
+                    : t('+{{count}} more', { count: hiddenCount })}
+                </Text>
+              </Button>
+            ) : null}
+          </View>
+        </>
+      )}
+    </View>
+  );
+}
+
+function MobileCapacitySummary({
+  value,
+  balance,
+  maxValue,
+}: {
+  value: number;
+  balance: number;
+  maxValue: number;
+}) {
+  const format = useFormat();
+  const usageColor =
+    value === 0
+      ? theme.reportsGray
+      : value >= balance
+        ? theme.reportsGreen
+        : theme.reportsBlue;
+  const allocationRatio = balance > 0 ? Math.max(0, Math.min(1, value / balance)) : 0;
+  const availableRatio =
+    balance > 0 ? Math.max(0, Math.min(1, maxValue / balance)) : 0;
+  const moreAvailable = Math.max(0, maxValue - value);
+
+  return (
+    <View style={{ gap: 8 }}>
+      <Text style={{ ...styles.smallText, color: theme.pageTextSubdued }}>
+        <Trans>Capacity</Trans>
+      </Text>
+
+      <View
+        style={{
+          gap: 4,
+          flexDirection: 'row',
+          alignItems: 'baseline',
+          ...styles.tnum,
+        }}
+      >
+        <FinancialText>{format(value, 'financial')}</FinancialText>
+        <Text style={{ color: theme.pageTextSubdued }}>/</Text>
+        <FinancialText style={{ color: theme.pageTextSubdued }}>
+          {format(balance, 'financial')}
+        </FinancialText>
+      </View>
+
+      <div
+        aria-hidden="true"
+        style={{
+          position: 'relative',
+          height: 8,
+          width: '100%',
+          overflow: 'hidden',
+          borderRadius: 999,
+          backgroundColor: theme.tableBorder,
+        }}
+      >
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: `${availableRatio * 100}%`,
+            borderRadius: 999,
+            backgroundColor: usageColor,
+            opacity: 0.2,
+          }}
+        />
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: `${allocationRatio * 100}%`,
+            borderRadius: 999,
+            backgroundColor: usageColor,
+          }}
+        />
+      </div>
+
+      <Text
+        style={{
+          ...styles.smallText,
+          color: moreAvailable > 0 ? theme.reportsBlue : usageColor,
+        }}
+      >
+        {moreAvailable > 0 ? (
+          <Trans>
+            Up to <FinancialText>{format(maxValue, 'financial')}</FinancialText>
+          </Trans>
+        ) : (
+          <Trans>At max available</Trans>
+        )}
+      </Text>
+    </View>
+  );
+}
+
 function MobileCategoryCard({
   row,
   onOpenCategory,
@@ -246,25 +540,22 @@ function MobileCategoryCard({
   row: MobileCategoryRow;
   onOpenCategory: (categoryId: string) => void;
 }) {
-  const { t } = useTranslation();
   const format = useFormat();
+  const { t } = useTranslation();
   const { category, summaryAllocations } = row;
-  const summaryPreview = summaryAllocations.slice(0, 2);
-  const hiddenCount = summaryAllocations.length - summaryPreview.length;
 
   return (
     <Block
       style={{
-        padding: 14,
+        padding: 12,
         border: `1px solid ${theme.tableBorder}`,
         backgroundColor: theme.tableBackground,
-        boxShadow: '0 1px 4px rgba(0, 0, 0, 0.08)',
       }}
     >
-      <View style={{ gap: 10 }}>
+      <View style={{ gap: 8 }}>
         <View
           style={{
-            gap: 12,
+            gap: 10,
             flexDirection: 'row',
             justifyContent: 'space-between',
             alignItems: 'baseline',
@@ -288,39 +579,76 @@ function MobileCategoryCard({
           allocated={category.allocated}
           balance={category.balance}
           remainder={category.remainder}
+          showLabel={false}
         />
 
-        <View
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-            gap: 10,
-          }}
-        >
-          <View style={{ gap: 2 }}>
-            <Text style={{ ...styles.smallText, color: theme.pageTextSubdued }}>
-              <Trans>Funds location</Trans>
-            </Text>
-            <Text>
-              {summaryPreview.length > 0
-                ? summaryPreview
-                    .map(
-                      allocation =>
-                        `${allocation.accountName} ${format(
-                          allocation.amount,
-                          'financial',
-                        )}`,
-                    )
-                    .join(', ')
-                : t('Unassigned')}
-              {hiddenCount > 0 ? ` ${t('+{{count}} more', { count: hiddenCount })}` : ''}
-            </Text>
-          </View>
-        </View>
+        <MobileBreakdownSummary
+          label={t('Funds location')}
+          items={summaryAllocations.map(allocation => ({
+            id: allocation.accountId,
+            label: allocation.accountName,
+            amount: allocation.amount,
+          }))}
+          emptyLabel={t('Unassigned')}
+        />
 
         <Button onPress={() => onOpenCategory(category.id)}>
           <Trans>Edit accounts</Trans>
         </Button>
+      </View>
+    </Block>
+  );
+}
+
+function MobileAccountCard({
+  row,
+}: {
+  row: MobileAccountRow;
+}) {
+  const format = useFormat();
+  const { t } = useTranslation();
+
+  return (
+    <Block
+      style={{
+        padding: 12,
+        border: `1px solid ${theme.tableBorder}`,
+        backgroundColor: theme.tableBackground,
+      }}
+    >
+      <View style={{ gap: 8 }}>
+        <View
+          style={{
+            gap: 10,
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'baseline',
+          }}
+        >
+          <Text style={{ ...styles.mediumText, fontWeight: 600 }}>
+            {row.account.name}
+          </Text>
+          <FinancialText style={styles.tnum}>
+            {format(row.account.balance, 'financial')}
+          </FinancialText>
+        </View>
+
+        <MobileUsageSummary
+          allocated={row.account.allocated}
+          balance={row.account.balance}
+          remainder={row.account.remainder}
+          showLabel={false}
+        />
+
+        <MobileBreakdownSummary
+          label={t('Allocated categories')}
+          items={row.categoryAllocations.map(allocation => ({
+            id: allocation.categoryId,
+            label: allocation.categoryName,
+            amount: allocation.amount,
+          }))}
+          emptyLabel={t('Unassigned')}
+        />
       </View>
     </Block>
   );
@@ -341,12 +669,12 @@ function MobileEditorAccountCard({
   return (
     <Block
       style={{
-        padding: 14,
+        padding: 12,
         border: `1px solid ${theme.tableBorder}`,
         backgroundColor: theme.tableBackground,
       }}
     >
-      <View style={{ gap: 10 }}>
+      <View style={{ gap: 8 }}>
         <View
           style={{
             flexDirection: 'row',
@@ -363,20 +691,11 @@ function MobileEditorAccountCard({
           </FinancialText>
         </View>
 
-        <View
-          style={{
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            gap: 12,
-          }}
-        >
-          <Text style={{ ...styles.smallText, color: theme.pageTextSubdued }}>
-            <Trans>Max available</Trans>
-          </Text>
-          <FinancialText style={{ ...styles.smallText, ...styles.tnum }}>
-            {format(row.maxValue, 'financial')}
-          </FinancialText>
-        </View>
+        <MobileCapacitySummary
+          value={row.value}
+          balance={row.account.balance}
+          maxValue={row.maxValue}
+        />
 
         <AllocationSlider
           label={t('{{category}} allocation in {{account}}', {
@@ -393,6 +712,7 @@ function MobileEditorAccountCard({
 }
 
 export function MobileFundsLocationPage({
+  reportView,
   selectedMonth,
   monthBounds,
   clearDisabled,
@@ -401,6 +721,7 @@ export function MobileFundsLocationPage({
   totalCategoriesCount,
   selectedCategory,
   categoryRows,
+  accountRows,
   groupFilter,
   categoryFilter,
   groupFilterOptions,
@@ -412,6 +733,7 @@ export function MobileFundsLocationPage({
   showDialogSearch,
   dialogAccountRows,
   onSelectMonth,
+  onChangeReportView,
   onClearSavedMonth,
   onSave,
   onChangeGroupFilter,
@@ -432,9 +754,9 @@ export function MobileFundsLocationPage({
       <View style={{ gap: 16, padding: 12, paddingBottom: 24 }}>
         <Block
           style={{
-            padding: 14,
+            padding: 12,
+            border: `1px solid ${theme.tableBorder}`,
             backgroundColor: theme.tableBackground,
-            boxShadow: '0 1px 4px rgba(0, 0, 0, 0.08)',
           }}
         >
           <View style={{ gap: 12 }}>
@@ -494,112 +816,170 @@ export function MobileFundsLocationPage({
           <>
             <Block
               style={{
-                padding: 14,
+                padding: 12,
+                border: `1px solid ${theme.tableBorder}`,
                 backgroundColor: theme.tableBackground,
-                boxShadow: '0 1px 4px rgba(0, 0, 0, 0.08)',
               }}
             >
-              <View style={{ gap: 10 }}>
-                <MobileSummaryMetric
-                  label={t('Category balance total')}
-                  value={totals.categoryBalance}
-                />
-                <MobileSummaryMetric
-                  label={t('Allocated total')}
-                  value={totals.categoryAllocated}
-                />
-                <MobileSummaryMetric
-                  label={t('Category remainder')}
-                  value={totals.categoryRemainder}
-                  tone={
-                    totals.categoryRemainder === 0
-                      ? 'default'
-                      : totals.categoryRemainder > 0
-                        ? 'warning'
-                        : 'danger'
-                  }
-                />
-                <MobileSummaryMetric
-                  label={t('Editable account remainder')}
-                  value={totals.editableAccountRemainder}
-                  tone={accountWarningCount === 0 ? 'default' : 'warning'}
-                />
-              </View>
-            </Block>
-
-            <Block
-              style={{
-                padding: 14,
-                backgroundColor: theme.tableBackground,
-                boxShadow: '0 1px 4px rgba(0, 0, 0, 0.08)',
-              }}
-            >
-              <View style={{ gap: 10 }}>
-                <label
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 4,
-                  }}
-                >
+              <View style={{ gap: 12 }}>
+                <View style={{ gap: 8 }}>
                   <Text
                     style={{
                       ...styles.smallText,
                       color: theme.pageTextSubdued,
                     }}
                   >
-                    <Trans>Filter by group</Trans>
+                    <Trans>View</Trans>
                   </Text>
-                  <select
-                    aria-label={t('Filter by group')}
-                    value={groupFilter}
-                    onChange={event => onChangeGroupFilter(event.target.value)}
+                  <View
                     style={{
-                      height: 36,
-                      padding: '0 10px',
-                      borderRadius: 4,
-                      border: `1px solid ${theme.tableBorder}`,
-                      backgroundColor: theme.tableBackground,
-                      color: theme.pageText,
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                      gap: 8,
+                      width: '100%',
                     }}
                   >
-                    <option value="">
-                      <Trans>All groups</Trans>
-                    </option>
-                    {groupFilterOptions.map(groupName => (
-                      <option key={groupName} value={groupName}>
-                        {groupName}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <View style={{ gap: 4 }}>
-                  <Text
-                    style={{
-                      ...styles.smallText,
-                      color: theme.pageTextSubdued,
-                    }}
-                  >
-                    <Trans>Filter by category</Trans>
-                  </Text>
-                  <Search
-                    value={categoryFilter}
-                    onChange={onChangeCategoryFilter}
-                    placeholder={t('Filter categories')}
-                    width="100%"
-                  />
+                    <Button
+                      variant={
+                        reportView === 'category' ? 'menuSelected' : 'menu'
+                      }
+                      onPress={() => onChangeReportView('category')}
+                      style={{
+                        width: '100%',
+                        minWidth: 0,
+                        minHeight: 36,
+                      }}
+                    >
+                      <Trans>By category</Trans>
+                    </Button>
+                    <Button
+                      variant={
+                        reportView === 'account' ? 'menuSelected' : 'menu'
+                      }
+                      onPress={() => onChangeReportView('account')}
+                      style={{
+                        width: '100%',
+                        minWidth: 0,
+                        minHeight: 36,
+                      }}
+                    >
+                      <Trans>By account</Trans>
+                    </Button>
+                  </View>
                 </View>
 
-                {hasActiveFilters ? (
-                  <Button onPress={onClearFilters}>
-                    <Trans>Clear filters</Trans>
-                  </Button>
+                {reportView === 'category' ? (
+                  <>
+                    <div
+                      aria-hidden="true"
+                      style={{
+                        height: 1,
+                        width: '100%',
+                        backgroundColor: theme.tableBorder,
+                      }}
+                    />
+
+                    <View style={{ gap: 8 }}>
+                    <label
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 4,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          ...styles.smallText,
+                          color: theme.pageTextSubdued,
+                        }}
+                      >
+                        <Trans>Filter by group</Trans>
+                      </Text>
+                      <select
+                        aria-label={t('Filter by group')}
+                        value={groupFilter}
+                        onChange={event => onChangeGroupFilter(event.target.value)}
+                        style={{
+                          height: 36,
+                          padding: '0 10px',
+                          borderRadius: 4,
+                          border: `1px solid ${theme.tableBorder}`,
+                          backgroundColor: theme.tableBackground,
+                          color: theme.pageText,
+                        }}
+                      >
+                        <option value="">
+                          <Trans>All groups</Trans>
+                        </option>
+                        {groupFilterOptions.map(groupName => (
+                          <option key={groupName} value={groupName}>
+                            {groupName}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <View style={{ gap: 4 }}>
+                      <Text
+                        style={{
+                          ...styles.smallText,
+                          color: theme.pageTextSubdued,
+                        }}
+                      >
+                        <Trans>Filter by category</Trans>
+                      </Text>
+                      <Search
+                        value={categoryFilter}
+                        onChange={onChangeCategoryFilter}
+                        placeholder={t('Filter categories')}
+                        width="100%"
+                      />
+                    </View>
+
+                    {hasActiveFilters ? (
+                      <Button onPress={onClearFilters}>
+                        <Trans>Clear filters</Trans>
+                      </Button>
+                    ) : null}
+                    </View>
+                  </>
                 ) : null}
               </View>
             </Block>
 
-            {totalCategoriesCount === 0 ? (
+            <MobileSummaryBlock
+              summary={
+                reportView === 'account'
+                  ? {
+                      label: t('Editable account usage'),
+                      allocated: totals.accountAllocated,
+                      balance: totals.accountBalance,
+                      remainder: totals.editableAccountRemainder,
+                      note:
+                        accountWarningCount > 0 ? (
+                          <Trans>
+                            {{ count: accountWarningCount }} accounts need review
+                          </Trans>
+                        ) : (
+                          <Trans>All editable accounts are aligned.</Trans>
+                        ),
+                    }
+                  : {
+                      label: t('Category usage'),
+                      allocated: totals.categoryAllocated,
+                      balance: totals.categoryBalance,
+                      remainder: totals.categoryRemainder,
+                      note:
+                        totals.categoryRemainder < 0 ? (
+                          <Trans>Categories are overallocated.</Trans>
+                        ) : (
+                          <Trans>Tracks budget category funding for the month.</Trans>
+                        ),
+                    }
+              }
+            />
+
+            {reportView === 'category' && totalCategoriesCount === 0 ? (
               <Block
                 style={{
                   padding: 16,
@@ -620,7 +1000,7 @@ export function MobileFundsLocationPage({
               >
                 <Trans>No categories match the current filters.</Trans>
               </Block>
-            ) : (
+            ) : reportView === 'category' ? (
               <View style={{ gap: 12 }}>
                 {categoryRows.map(row => (
                   <MobileCategoryCard
@@ -628,6 +1008,21 @@ export function MobileFundsLocationPage({
                     row={row}
                     onOpenCategory={onOpenCategory}
                   />
+                ))}
+              </View>
+            ) : accountRows.length === 0 ? (
+              <Block
+                style={{
+                  padding: 16,
+                  border: `1px solid ${theme.pillBorder}`,
+                }}
+              >
+                <Trans>There are no editable accounts to inspect for this month.</Trans>
+              </Block>
+            ) : (
+              <View style={{ gap: 12 }}>
+                {accountRows.map(row => (
+                  <MobileAccountCard key={row.account.id} row={row} />
                 ))}
               </View>
             )}
@@ -656,35 +1051,20 @@ export function MobileFundsLocationPage({
           />
 
           <View style={{ gap: 16, padding: 16 }}>
-            <Block
-              style={{
-                padding: 14,
-                backgroundColor: theme.tableBackground,
-                border: `1px solid ${theme.tableBorder}`,
+            <MobileSummaryBlock
+              summary={{
+                label: t('Category usage'),
+                allocated: dialogAllocatedTotal,
+                balance: selectedCategory.balance,
+                remainder: dialogRemainder,
+                note:
+                  dialogRemainder < 0 ? (
+                    <Trans>Reduce allocations before applying changes.</Trans>
+                  ) : (
+                    <Trans>Adjust how this category is spread across accounts.</Trans>
+                  ),
               }}
-            >
-              <View style={{ gap: 10 }}>
-                <MobileSummaryMetric
-                  label={t('Category balance')}
-                  value={selectedCategory.balance}
-                />
-                <MobileSummaryMetric
-                  label={t('Currently allocated')}
-                  value={dialogAllocatedTotal}
-                />
-                <MobileSummaryMetric
-                  label={t('Remainder')}
-                  value={dialogRemainder}
-                  tone={
-                    dialogRemainder === 0
-                      ? 'default'
-                      : dialogRemainder > 0
-                        ? 'warning'
-                        : 'danger'
-                  }
-                />
-              </View>
-            </Block>
+            />
 
             <Block
               style={{
