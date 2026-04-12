@@ -412,6 +412,47 @@ describe('FundsLocation', () => {
     expect(screen.queryByText('Vacation')).not.toBeInTheDocument();
   });
 
+  test('switches to account view and shows account allocation details', async () => {
+    renderFundsLocation();
+
+    await screen.findByTestId('funds-location-table');
+
+    fireEvent.click(screen.getByRole('button', { name: 'By account' }));
+
+    const accountTable = await screen.findByTestId(
+      'funds-location-account-table',
+    );
+    const detailPanel = screen.getByTestId('funds-location-account-detail');
+
+    expect(accountTable).toHaveTextContent('Checking');
+    expect(accountTable).toHaveTextContent('Savings');
+    expect(accountTable).toHaveTextContent('Food');
+    expect(accountTable).toHaveTextContent('Utilities');
+    expect(within(detailPanel).getByText('Checking')).toBeInTheDocument();
+    expect(within(detailPanel).getByText('Food')).toBeInTheDocument();
+    expect(within(detailPanel).getAllByText('3000').length).toBeGreaterThan(0);
+  });
+
+  test('account detail panel updates when selecting another account', async () => {
+    renderFundsLocation();
+
+    await screen.findByTestId('funds-location-table');
+
+    fireEvent.click(screen.getByRole('button', { name: 'By account' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Show Savings details' }),
+    );
+
+    const detailPanel = await screen.findByTestId(
+      'funds-location-account-detail',
+    );
+
+    expect(within(detailPanel).getByText('Savings')).toBeInTheDocument();
+    expect(within(detailPanel).getByText('Utilities')).toBeInTheDocument();
+    expect(within(detailPanel).getAllByText('1200').length).toBeGreaterThan(0);
+    expect(within(detailPanel).queryByText('Food')).not.toBeInTheDocument();
+  });
+
   test('sorts grid-mode report rows by account column', async () => {
     renderFundsLocation();
 

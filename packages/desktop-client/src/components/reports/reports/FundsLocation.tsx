@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 
@@ -52,6 +52,7 @@ import { AllocationSlider } from './FundsLocationAllocationSlider';
 import { MobileFundsLocationPage } from './FundsLocationMobilePage';
 
 type DraftAllocationMap = Record<string, FundsLocationAllocationInput>;
+type FundsLocationReportView = 'category' | 'account';
 
 const STICKY_COLUMNS = [
   'group',
@@ -67,6 +68,7 @@ type StickyReportColumn = (typeof STICKY_COLUMNS)[number];
 
 type ReportSortColumn =
   | 'default'
+  | 'accountName'
   | 'group'
   | 'category'
   | 'balance'
@@ -218,21 +220,6 @@ function toDraftAllocationArray(
   );
 }
 
-function getStickyCellStyle(
-  column: StickyReportColumn,
-  left: number,
-  extraStyle?: CSSProperties,
-) {
-  return {
-    position: 'sticky',
-    left,
-    minWidth: getStickyColumnMinWidth(column),
-    backgroundColor: theme.tableBackground,
-    zIndex: 2,
-    ...extraStyle,
-  } satisfies CSSProperties;
-}
-
 function getStickyColumnMinWidth(column: StickyReportColumn) {
   switch (column) {
     case 'group':
@@ -245,16 +232,6 @@ function getStickyColumnMinWidth(column: StickyReportColumn) {
     default:
       return 100;
   }
-}
-
-function getDefaultStickyColumnWidths(): Record<StickyReportColumn, number> {
-  return {
-    group: getStickyColumnMinWidth('group'),
-    category: getStickyColumnMinWidth('category'),
-    balance: getStickyColumnMinWidth('balance'),
-    allocated: getStickyColumnMinWidth('allocated'),
-    remainder: getStickyColumnMinWidth('remainder'),
-  };
 }
 
 function getReportTableMinWidth({
@@ -416,6 +393,40 @@ function getCategorySummaryAllocations({
     });
 }
 
+function getAccountCategoryAllocations({
+  accountId,
+  categories,
+  draftAllocations,
+}: {
+  accountId: string;
+  categories: Array<{
+    id: string;
+    name: string;
+    group_name: string;
+  }>;
+  draftAllocations: DraftAllocationMap;
+}) {
+  return categories
+    .map(category => ({
+      categoryId: category.id,
+      categoryName: category.name,
+      groupName: category.group_name,
+      amount: getDraftAllocationAmount(
+        draftAllocations,
+        category.id,
+        accountId,
+      ),
+    }))
+    .filter(allocation => allocation.amount > 0)
+    .sort((left, right) => {
+      if (right.amount !== left.amount) {
+        return right.amount - left.amount;
+      }
+
+      return left.categoryName.localeCompare(right.categoryName);
+    });
+}
+
 function getInitialDialogAccountOrder({
   editableAccounts,
   allocations,
@@ -507,6 +518,7 @@ function getDefaultDialogSortDirection(column: DialogSortColumn) {
 
 function getDefaultReportSortDirection(column: ReportSortColumn) {
   switch (column) {
+    case 'accountName':
     case 'group':
     case 'category':
     case 'summary':
@@ -543,18 +555,16 @@ export function FundsLocation() {
     column: 'default',
     direction: getDefaultReportSortDirection('default'),
   });
+  const [reportView, setReportView] =
+    useState<FundsLocationReportView>('category');
   const [groupFilter, setGroupFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(
+    null,
+  );
   const [categoryDialogState, setCategoryDialogState] =
     useState<CategoryDialogState | null>(null);
   const [dialogSearch, setDialogSearch] = useState('');
-  const stickyHeaderRefs = useRef<
-    Partial<Record<StickyReportColumn, HTMLTableCellElement | null>>
-  >({});
-  const [stickyColumnWidths, setStickyColumnWidths] = useState<
-    Record<StickyReportColumn, number>
-  >(() => getDefaultStickyColumnWidths());
-
   useEffect(() => {
     if (!allMonths || allMonths.length === 0) {
       return;
@@ -793,6 +803,97 @@ export function FundsLocation() {
       });
   }, [categoryFilter, categoryRows, groupFilter, reportSort]);
 
+  const accountRows = useMemo(() => {
+    if (!displayData) {
+      return [];
+    }
+
+    return displayData.editableAccounts.map((account, index) => {
+      const categoryAllocations = getAccountCategoryAllocations({
+        accountId: account.id,
+        categories: displayData.categories,
+        draftAllocations,
+      });
+
+      return {
+        account,
+        index,
+        categoryAllocations,
+        summarySortValue:
+          categoryAllocations.length > 0
+            ? categoryAllocations
+                .map(
+                  allocation =>
+                    `${allocation.categoryName}:${String(allocation.amount).padStart(12, '0')}`,
+                )
+                .join('|')
+            : 'Unassigned',
+      };
+    });
+  }, [displayData, draftAllocations]);
+
+  const sortedAccountRows = useMemo(() => {
+    return [...accountRows].sort((left, right) => {
+      const compareByDefaultOrder = () => left.index - right.index;
+
+      switch (reportSort.column) {
+        case 'default':
+          return compareByDefaultOrder();
+        case 'accountName': {
+          const comparison =
+            left.account.name.localeCompare(right.account.name) *
+            (reportSort.direction === 'asc' ? 1 : -1);
+
+          return comparison || compareByDefaultOrder();
+        }
+        case 'balance':
+        case 'allocated':
+        case 'remainder': {
+          const comparison =
+            ((left.account[reportSort.column] as number) -
+              (right.account[reportSort.column] as number)) *
+            (reportSort.direction === 'asc' ? 1 : -1);
+
+          return (
+            comparison ||
+            left.account.name.localeCompare(right.account.name) ||
+            compareByDefaultOrder()
+          );
+        }
+        case 'summary': {
+          const comparison =
+            left.summarySortValue.localeCompare(right.summarySortValue) *
+            (reportSort.direction === 'asc' ? 1 : -1);
+
+          return (
+            comparison ||
+            left.account.name.localeCompare(right.account.name) ||
+            compareByDefaultOrder()
+          );
+        }
+        default:
+          return compareByDefaultOrder();
+      }
+    });
+  }, [accountRows, reportSort]);
+
+  useEffect(() => {
+    if (reportView !== 'account') {
+      return;
+    }
+
+    if (accountRows.length === 0) {
+      if (selectedAccountId !== null) {
+        setSelectedAccountId(null);
+      }
+      return;
+    }
+
+    if (!accountRows.some(row => row.account.id === selectedAccountId)) {
+      setSelectedAccountId(accountRows[0].account.id);
+    }
+  }, [accountRows, reportView, selectedAccountId]);
+
   const saveMutation = useMutation<
     FundsLocationMonthEntity,
     Error,
@@ -870,56 +971,16 @@ export function FundsLocation() {
     );
   }, [categoryDialogState, displayData]);
 
-  const setStickyHeaderRef =
-    (column: StickyReportColumn) =>
-    (element: HTMLTableCellElement | null) => {
-      stickyHeaderRefs.current[column] = element;
-    };
-
-  useLayoutEffect(() => {
-    if (!displayData || isNarrowWidth) {
-      return;
+  const selectedAccountRow = useMemo(() => {
+    if (!selectedAccountId) {
+      return null;
     }
 
-    function measureStickyColumns() {
-      setStickyColumnWidths(current => {
-        const next = { ...current };
-        let hasChanged = false;
-
-        for (const column of STICKY_COLUMNS) {
-          const element = stickyHeaderRefs.current[column];
-          const width = Math.max(
-            getStickyColumnMinWidth(column),
-            Math.ceil(element?.getBoundingClientRect().width ?? 0),
-          );
-
-          if (current[column] !== width) {
-            next[column] = width;
-            hasChanged = true;
-          }
-        }
-
-        return hasChanged ? next : current;
-      });
-    }
-
-    measureStickyColumns();
-
-    if (typeof ResizeObserver === 'undefined') {
-      return;
-    }
-
-    const observer = new ResizeObserver(() => measureStickyColumns());
-
-    for (const column of STICKY_COLUMNS) {
-      const element = stickyHeaderRefs.current[column];
-      if (element) {
-        observer.observe(element);
-      }
-    }
-
-    return () => observer.disconnect();
-  }, [displayData, isHighAccountCount, isNarrowWidth, reportSort]);
+    return (
+      accountRows.find(accountRow => accountRow.account.id === selectedAccountId) ??
+      null
+    );
+  }, [accountRows, selectedAccountId]);
 
   const dialogAllocatedTotal = useMemo(() => {
     if (!categoryDialogState) {
@@ -1332,6 +1393,8 @@ export function FundsLocation() {
     (sum, account) => sum + account.remainder,
     0,
   );
+  const hasActiveCategoryFilters =
+    groupFilter !== '' || categoryFilter.trim() !== '';
 
   if (isNarrowWidth) {
     return (
@@ -1390,24 +1453,945 @@ export function FundsLocation() {
     );
   }
 
-  const stickyOffsets = {
-    group: 0,
-    category: stickyColumnWidths.group,
-    balance: stickyColumnWidths.group + stickyColumnWidths.category,
-    allocated:
-      stickyColumnWidths.group +
-      stickyColumnWidths.category +
-      stickyColumnWidths.balance,
-    remainder:
-      stickyColumnWidths.group +
-      stickyColumnWidths.category +
-      stickyColumnWidths.balance +
-      stickyColumnWidths.allocated,
-  };
   const reportTableMinWidth = getReportTableMinWidth({
     editableAccountCount: displayData.editableAccounts.length,
     isHighAccountCount,
   });
+  const accountReportContent =
+    displayData.categories.length === 0 ? (
+      <Block
+        style={{
+          padding: 16,
+          border: `1px solid ${theme.pillBorder}`,
+        }}
+      >
+        <Trans>
+          There are no positive category balances to allocate for this month.
+        </Trans>
+      </Block>
+    ) : accountRows.length === 0 ? (
+      <Block
+        style={{
+          padding: 16,
+          border: `1px solid ${theme.pillBorder}`,
+        }}
+      >
+        <Trans>There are no editable accounts to inspect for this month.</Trans>
+      </Block>
+    ) : (
+      <View
+        style={{
+          gap: 16,
+          flexDirection: 'row',
+          alignItems: 'stretch',
+        }}
+      >
+        <div
+          style={{
+            flex: '1 1 0',
+            minWidth: 0,
+            overflowX: 'auto',
+            overflowY: 'auto',
+            maxHeight: 'calc(100vh - 360px)',
+            border: `1px solid ${theme.pillBorder}`,
+            backgroundColor: theme.tableBackground,
+          }}
+          data-testid="funds-location-account-table"
+        >
+          <table
+            style={{
+              width: '100%',
+              borderCollapse: 'separate',
+              borderSpacing: 0,
+            }}
+          >
+            <thead>
+              <tr>
+                <th
+                  style={{
+                    padding: 12,
+                    textAlign: 'left',
+                    borderBottom: `1px solid ${theme.tableBorder}`,
+                    position: 'sticky',
+                    top: 0,
+                    zIndex: 2,
+                    backgroundColor: theme.tableBackground,
+                  }}
+                >
+                  {renderReportSortHeader(t('Account'), 'accountName')}
+                </th>
+                <th
+                  style={{
+                    padding: 12,
+                    textAlign: 'right',
+                    borderBottom: `1px solid ${theme.tableBorder}`,
+                    position: 'sticky',
+                    top: 0,
+                    zIndex: 2,
+                    backgroundColor: theme.tableBackground,
+                  }}
+                >
+                  {renderReportSortHeader(t('Balance'), 'balance', {
+                    align: 'right',
+                  })}
+                </th>
+                <th
+                  style={{
+                    padding: 12,
+                    textAlign: 'right',
+                    borderBottom: `1px solid ${theme.tableBorder}`,
+                    position: 'sticky',
+                    top: 0,
+                    zIndex: 2,
+                    backgroundColor: theme.tableBackground,
+                  }}
+                >
+                  {renderReportSortHeader(t('Allocated'), 'allocated', {
+                    align: 'right',
+                  })}
+                </th>
+                <th
+                  style={{
+                    padding: 12,
+                    textAlign: 'right',
+                    borderBottom: `1px solid ${theme.tableBorder}`,
+                    position: 'sticky',
+                    top: 0,
+                    zIndex: 2,
+                    backgroundColor: theme.tableBackground,
+                  }}
+                >
+                  {renderReportSortHeader(t('Remainder'), 'remainder', {
+                    align: 'right',
+                  })}
+                </th>
+                <th
+                  style={{
+                    minWidth: 320,
+                    padding: 12,
+                    textAlign: 'left',
+                    borderBottom: `1px solid ${theme.tableBorder}`,
+                    position: 'sticky',
+                    top: 0,
+                    zIndex: 2,
+                    backgroundColor: theme.tableBackground,
+                  }}
+                >
+                  {renderReportSortHeader(
+                    t('Allocated categories'),
+                    'summary',
+                  )}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedAccountRows.map(accountRow => {
+                const isSelected = selectedAccountId === accountRow.account.id;
+                const visibleCategoryAllocations =
+                  accountRow.categoryAllocations.slice(0, 3);
+                const hiddenCategoryCount =
+                  accountRow.categoryAllocations.length -
+                  visibleCategoryAllocations.length;
+                const rowBackground = isSelected
+                  ? theme.tableRowBackgroundHighlight
+                  : theme.tableBackground;
+                const rowTextColor = isSelected
+                  ? theme.tableRowBackgroundHighlightText
+                  : theme.pageText;
+
+                return (
+                  <tr key={accountRow.account.id}>
+                    <td
+                      style={{
+                        padding: 12,
+                        borderBottom: `1px solid ${theme.tableBorder}`,
+                        backgroundColor: rowBackground,
+                        color: rowTextColor,
+                      }}
+                    >
+                      <Button
+                        variant="bare"
+                        aria-label={t('Show {{account}} details', {
+                          account: accountRow.account.name,
+                        })}
+                        onPress={() => setSelectedAccountId(accountRow.account.id)}
+                        style={{
+                          padding: 0,
+                          minWidth: 0,
+                          justifyContent: 'flex-start',
+                          color: 'inherit',
+                        }}
+                      >
+                        <Text style={{ fontWeight: 600 }}>
+                          {accountRow.account.name}
+                        </Text>
+                      </Button>
+                    </td>
+                    <td
+                      style={{
+                        padding: 12,
+                        textAlign: 'right',
+                        borderBottom: `1px solid ${theme.tableBorder}`,
+                        backgroundColor: rowBackground,
+                        color: rowTextColor,
+                        ...styles.tnum,
+                      }}
+                    >
+                      <FinancialText>
+                        {format(accountRow.account.balance, 'financial')}
+                      </FinancialText>
+                    </td>
+                    <td
+                      style={{
+                        padding: 12,
+                        textAlign: 'right',
+                        borderBottom: `1px solid ${theme.tableBorder}`,
+                        backgroundColor: rowBackground,
+                        color: rowTextColor,
+                        ...styles.tnum,
+                      }}
+                    >
+                      <FinancialText>
+                        {format(accountRow.account.allocated, 'financial')}
+                      </FinancialText>
+                    </td>
+                    <td
+                      style={{
+                        padding: 12,
+                        textAlign: 'right',
+                        borderBottom: `1px solid ${theme.tableBorder}`,
+                        backgroundColor: rowBackground,
+                        color:
+                          accountRow.account.remainder === 0
+                            ? rowTextColor
+                            : theme.noticeText,
+                        ...styles.tnum,
+                      }}
+                    >
+                      <FinancialText>
+                        {format(accountRow.account.remainder, 'financial')}
+                      </FinancialText>
+                    </td>
+                    <td
+                      style={{
+                        minWidth: 320,
+                        padding: 12,
+                        borderBottom: `1px solid ${theme.tableBorder}`,
+                        backgroundColor: rowBackground,
+                        color: rowTextColor,
+                        verticalAlign: 'top',
+                      }}
+                    >
+                      {visibleCategoryAllocations.length > 0 ? (
+                        <View style={{ gap: 4 }}>
+                          {visibleCategoryAllocations.map(allocation => (
+                            <View
+                              key={`${accountRow.account.id}-${allocation.categoryId}`}
+                              style={{
+                                gap: 8,
+                                flexDirection: 'row',
+                                justifyContent: 'space-between',
+                              }}
+                            >
+                              <Text>{allocation.categoryName}</Text>
+                              <FinancialText style={styles.tnum}>
+                                {format(allocation.amount, 'financial')}
+                              </FinancialText>
+                            </View>
+                          ))}
+                          {hiddenCategoryCount > 0 ? (
+                            <Text
+                              style={{
+                                ...styles.smallText,
+                                color: isSelected
+                                  ? rowTextColor
+                                  : theme.pageTextSubdued,
+                              }}
+                            >
+                              {t('+{{count}} more', {
+                                count: hiddenCategoryCount,
+                              })}
+                            </Text>
+                          ) : null}
+                        </View>
+                      ) : (
+                        <Text
+                          style={{
+                            color: isSelected
+                              ? rowTextColor
+                              : theme.pageTextSubdued,
+                          }}
+                        >
+                          <Trans>Unassigned</Trans>
+                        </Text>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <Block
+          style={{
+            flex: '0 0 320px',
+            width: 320,
+            padding: 16,
+            alignSelf: 'stretch',
+            backgroundColor: theme.tableBackground,
+            boxShadow: '0 1px 4px rgba(0, 0, 0, 0.08)',
+          }}
+          data-testid="funds-location-account-detail"
+        >
+          {selectedAccountRow ? (
+            <View style={{ gap: 16 }}>
+              <View style={{ gap: 4 }}>
+                <Text
+                  style={{
+                    ...styles.smallText,
+                    color: theme.pageTextSubdued,
+                  }}
+                >
+                  <Trans>Selected account</Trans>
+                </Text>
+                <Text style={{ ...styles.mediumText, fontWeight: 600 }}>
+                  {selectedAccountRow.account.name}
+                </Text>
+              </View>
+
+              <Block
+                style={{
+                  padding: 12,
+                  border: `1px solid ${theme.tableBorder}`,
+                  backgroundColor: theme.tableBackground,
+                }}
+              >
+                <View style={{ gap: 8 }}>
+                  <View
+                    style={{
+                      gap: 8,
+                      flexDirection: 'row',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <Text
+                      style={{
+                        ...styles.smallText,
+                        color: theme.pageTextSubdued,
+                      }}
+                    >
+                      <Trans>Balance</Trans>
+                    </Text>
+                    <FinancialText style={styles.tnum}>
+                      {format(selectedAccountRow.account.balance, 'financial')}
+                    </FinancialText>
+                  </View>
+                  <View
+                    style={{
+                      gap: 8,
+                      flexDirection: 'row',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <Text
+                      style={{
+                        ...styles.smallText,
+                        color: theme.pageTextSubdued,
+                      }}
+                    >
+                      <Trans>Allocated total</Trans>
+                    </Text>
+                    <FinancialText style={styles.tnum}>
+                      {format(selectedAccountRow.account.allocated, 'financial')}
+                    </FinancialText>
+                  </View>
+                  <View
+                    style={{
+                      gap: 8,
+                      flexDirection: 'row',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <Text
+                      style={{
+                        ...styles.smallText,
+                        color: theme.pageTextSubdued,
+                      }}
+                    >
+                      <Trans>Remainder</Trans>
+                    </Text>
+                    <FinancialText
+                      style={{
+                        ...styles.tnum,
+                        color:
+                          selectedAccountRow.account.remainder === 0
+                            ? theme.pageText
+                            : theme.noticeText,
+                      }}
+                    >
+                      {format(selectedAccountRow.account.remainder, 'financial')}
+                    </FinancialText>
+                  </View>
+                </View>
+              </Block>
+
+              <View style={{ gap: 8 }}>
+                <Text
+                  style={{
+                    ...styles.smallText,
+                    color: theme.pageTextSubdued,
+                  }}
+                >
+                  <Trans>Allocated categories</Trans>
+                </Text>
+
+                {selectedAccountRow.categoryAllocations.length > 0 ? (
+                  <View
+                    style={{
+                      gap: 10,
+                      maxHeight: 'calc(100vh - 520px)',
+                      overflowY: 'auto',
+                    }}
+                  >
+                    {selectedAccountRow.categoryAllocations.map(allocation => (
+                      <Block
+                        key={`${selectedAccountRow.account.id}-${allocation.categoryId}`}
+                        style={{
+                          padding: 12,
+                          border: `1px solid ${theme.tableBorder}`,
+                          backgroundColor: theme.tableBackground,
+                        }}
+                      >
+                        <View style={{ gap: 6 }}>
+                          <View
+                            style={{
+                              gap: 8,
+                              flexDirection: 'row',
+                              justifyContent: 'space-between',
+                              alignItems: 'baseline',
+                            }}
+                          >
+                            <Text style={{ fontWeight: 600 }}>
+                              {allocation.categoryName}
+                            </Text>
+                            <FinancialText style={styles.tnum}>
+                              {format(allocation.amount, 'financial')}
+                            </FinancialText>
+                          </View>
+                          <Text
+                            style={{
+                              ...styles.smallText,
+                              color: theme.pageTextSubdued,
+                            }}
+                          >
+                            {allocation.groupName}
+                          </Text>
+                        </View>
+                      </Block>
+                    ))}
+                  </View>
+                ) : (
+                  <Block
+                    style={{
+                      padding: 12,
+                      border: `1px solid ${theme.tableBorder}`,
+                      backgroundColor: theme.tableBackground,
+                    }}
+                  >
+                    <Text style={{ color: theme.pageTextSubdued }}>
+                      <Trans>
+                        No categories are currently allocated to this account.
+                      </Trans>
+                    </Text>
+                  </Block>
+                )}
+              </View>
+            </View>
+          ) : (
+            <Text style={{ color: theme.pageTextSubdued }}>
+              <Trans>Select an account to view its allocated categories.</Trans>
+            </Text>
+          )}
+        </Block>
+      </View>
+    );
+  const categoryReportContent =
+    displayData.categories.length === 0 ? (
+      <Block
+        style={{
+          padding: 16,
+          border: `1px solid ${theme.pillBorder}`,
+        }}
+      >
+        <Trans>
+          There are no positive category balances to allocate for this month.
+        </Trans>
+      </Block>
+    ) : filteredSortedCategoryRows.length === 0 ? (
+      <Block
+        style={{
+          padding: 16,
+          border: `1px solid ${theme.pillBorder}`,
+        }}
+      >
+        <Trans>No categories match the current filters.</Trans>
+      </Block>
+    ) : (
+      <View
+        style={{
+          gap: 16,
+          flexDirection: 'row',
+          alignItems: 'stretch',
+        }}
+      >
+        <div
+          style={{
+            flex: '1 1 0',
+            minWidth: 0,
+            overflowX: 'auto',
+            overflowY: 'auto',
+            maxHeight: isNarrowWidth ? undefined : 'calc(100vh - 320px)',
+            border: `1px solid ${theme.pillBorder}`,
+            backgroundColor: theme.tableBackground,
+          }}
+          data-testid="funds-location-table"
+        >
+          <table
+            style={{
+              width: '100%',
+              borderCollapse: 'separate',
+              borderSpacing: 0,
+            }}
+          >
+            <thead>
+              <tr>
+                <th
+                  style={{
+                    minWidth: getStickyColumnMinWidth('group'),
+                    padding: 12,
+                    textAlign: 'left',
+                    borderBottom: `1px solid ${theme.tableBorder}`,
+                    position: 'sticky',
+                    top: 0,
+                    zIndex: 2,
+                    backgroundColor: theme.tableBackground,
+                  }}
+                >
+                  {renderReportSortHeader(t('Group'), 'group')}
+                </th>
+                <th
+                  style={{
+                    minWidth: getStickyColumnMinWidth('category'),
+                    padding: 12,
+                    textAlign: 'left',
+                    borderBottom: `1px solid ${theme.tableBorder}`,
+                    position: 'sticky',
+                    top: 0,
+                    zIndex: 2,
+                    backgroundColor: theme.tableBackground,
+                  }}
+                >
+                  {renderReportSortHeader(t('Category'), 'category')}
+                </th>
+                <th
+                  style={{
+                    minWidth: getStickyColumnMinWidth('balance'),
+                    padding: 12,
+                    textAlign: 'right',
+                    borderBottom: `1px solid ${theme.tableBorder}`,
+                    position: 'sticky',
+                    top: 0,
+                    zIndex: 2,
+                    backgroundColor: theme.tableBackground,
+                  }}
+                >
+                  {renderReportSortHeader(t('Balance'), 'balance', {
+                    align: 'right',
+                  })}
+                </th>
+                <th
+                  style={{
+                    minWidth: getStickyColumnMinWidth('allocated'),
+                    padding: 12,
+                    textAlign: 'right',
+                    borderBottom: `1px solid ${theme.tableBorder}`,
+                    position: 'sticky',
+                    top: 0,
+                    zIndex: 2,
+                    backgroundColor: theme.tableBackground,
+                  }}
+                >
+                  {renderReportSortHeader(t('Allocated'), 'allocated', {
+                    align: 'right',
+                  })}
+                </th>
+                <th
+                  style={{
+                    minWidth: getStickyColumnMinWidth('remainder'),
+                    padding: 12,
+                    textAlign: 'right',
+                    borderBottom: `1px solid ${theme.tableBorder}`,
+                    position: 'sticky',
+                    top: 0,
+                    zIndex: 2,
+                    backgroundColor: theme.tableBackground,
+                  }}
+                >
+                  {renderReportSortHeader(t('Remainder'), 'remainder', {
+                    align: 'right',
+                  })}
+                </th>
+                {isHighAccountCount ? (
+                  <>
+                    <th
+                      style={{
+                        minWidth: 260,
+                        padding: 12,
+                        verticalAlign: 'bottom',
+                        textAlign: 'left',
+                        borderBottom: `1px solid ${theme.tableBorder}`,
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 4,
+                        backgroundColor: theme.tableBackground,
+                      }}
+                    >
+                      {renderReportSortHeader(t('Allocation summary'), 'summary')}
+                    </th>
+                    <th
+                      style={{
+                        minWidth: 140,
+                        padding: 12,
+                        verticalAlign: 'bottom',
+                        textAlign: 'left',
+                        borderBottom: `1px solid ${theme.tableBorder}`,
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 4,
+                        backgroundColor: theme.tableBackground,
+                      }}
+                    >
+                      <Trans>Actions</Trans>
+                    </th>
+                  </>
+                ) : (
+                  displayData.editableAccounts.map(account => (
+                    <th
+                      key={account.id}
+                      style={{
+                        minWidth: 140,
+                        padding: 12,
+                        verticalAlign: 'bottom',
+                        textAlign: 'left',
+                        borderBottom: `1px solid ${theme.tableBorder}`,
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 4,
+                        backgroundColor: theme.tableBackground,
+                      }}
+                    >
+                      {renderReportSortHeader(account.name, 'account', {
+                        accountId: account.id,
+                        subtitle: format(account.balance, 'financial'),
+                      })}
+                    </th>
+                  ))
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {filteredSortedCategoryRows.map(row => {
+                const { category, summaryAllocations, accountAmounts } = row;
+                const visibleSummaryAllocations = summaryAllocations.slice(0, 3);
+                const hiddenSummaryCount =
+                  summaryAllocations.length - visibleSummaryAllocations.length;
+
+                return (
+                  <tr key={category.id}>
+                    <td
+                      style={{
+                        padding: 12,
+                        borderBottom: `1px solid ${theme.tableBorder}`,
+                      }}
+                    >
+                      {category.group_name}
+                    </td>
+                    <td
+                      style={{
+                        padding: 12,
+                        borderBottom: `1px solid ${theme.tableBorder}`,
+                      }}
+                    >
+                      {category.name}
+                    </td>
+                    <td
+                      style={{
+                        padding: 12,
+                        textAlign: 'right',
+                        borderBottom: `1px solid ${theme.tableBorder}`,
+                        ...styles.tnum,
+                      }}
+                    >
+                      <FinancialText>
+                        {format(category.balance, 'financial')}
+                      </FinancialText>
+                    </td>
+                    <td
+                      style={{
+                        padding: 12,
+                        textAlign: 'right',
+                        borderBottom: `1px solid ${theme.tableBorder}`,
+                        color: category.isOverallocated
+                          ? theme.errorText
+                          : theme.pageText,
+                        ...styles.tnum,
+                      }}
+                    >
+                      <FinancialText>
+                        {format(category.allocated, 'financial')}
+                      </FinancialText>
+                    </td>
+                    <td
+                      style={{
+                        padding: 12,
+                        textAlign: 'right',
+                        borderBottom: `1px solid ${theme.tableBorder}`,
+                        color:
+                          category.remainder === 0
+                            ? theme.pageText
+                            : category.remainder > 0
+                              ? theme.noticeText
+                              : theme.errorText,
+                        ...styles.tnum,
+                      }}
+                    >
+                      <FinancialText>
+                        {format(category.remainder, 'financial')}
+                      </FinancialText>
+                    </td>
+                    {isHighAccountCount ? (
+                      <>
+                        <td
+                          style={{
+                            minWidth: 260,
+                            padding: 12,
+                            borderBottom: `1px solid ${theme.tableBorder}`,
+                            verticalAlign: 'top',
+                          }}
+                        >
+                          {visibleSummaryAllocations.length > 0 ? (
+                            <View style={{ gap: 4 }}>
+                              {visibleSummaryAllocations.map(allocation => (
+                                <View
+                                  key={`${category.id}-${allocation.accountId}`}
+                                  style={{
+                                    gap: 8,
+                                    flexDirection: 'row',
+                                    justifyContent: 'space-between',
+                                  }}
+                                >
+                                  <Text>{allocation.accountName}</Text>
+                                  <FinancialText style={styles.tnum}>
+                                    {format(allocation.amount, 'financial')}
+                                  </FinancialText>
+                                </View>
+                              ))}
+                              {hiddenSummaryCount > 0 ? (
+                                <Text
+                                  style={{
+                                    ...styles.smallText,
+                                    color: theme.pageTextSubdued,
+                                  }}
+                                >
+                                  {t('+{{count}} more', {
+                                    count: hiddenSummaryCount,
+                                  })}
+                                </Text>
+                              ) : null}
+                            </View>
+                          ) : (
+                            <Text
+                              style={{
+                                color: theme.pageTextSubdued,
+                              }}
+                            >
+                              <Trans>Unassigned</Trans>
+                            </Text>
+                          )}
+                        </td>
+                        <td
+                          style={{
+                            minWidth: 140,
+                            padding: 12,
+                            borderBottom: `1px solid ${theme.tableBorder}`,
+                            verticalAlign: 'top',
+                          }}
+                        >
+                          <Button onPress={() => openCategoryDialog(category.id)}>
+                            <Trans>Edit accounts</Trans>
+                          </Button>
+                        </td>
+                      </>
+                    ) : (
+                      displayData.editableAccounts.map(account => {
+                        const value = accountAmounts[account.id] ?? 0;
+                        const maxAllocation = getAllocationSliderMax({
+                          currentValue: value,
+                          categoryRemainder: category.remainder,
+                          accountRemainder: account.remainder,
+                        });
+
+                        return (
+                          <td
+                            key={`${category.id}-${account.id}`}
+                            style={{
+                              minWidth: 140,
+                              padding: 8,
+                              borderBottom: `1px solid ${theme.tableBorder}`,
+                            }}
+                          >
+                            <AllocationSlider
+                              label={t('{{category}} allocation in {{account}}', {
+                                category: category.name,
+                                account: account.name,
+                              })}
+                              value={value}
+                              maxValue={maxAllocation}
+                              onUpdate={nextValue =>
+                                updateAllocation(
+                                  category.id,
+                                  account.id,
+                                  Math.min(nextValue, maxAllocation),
+                                )
+                              }
+                            />
+                          </td>
+                        );
+                      })
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td
+                  style={{
+                    padding: 12,
+                    borderTop: `1px solid ${theme.tableBorder}`,
+                    fontWeight: 600,
+                  }}
+                >
+                  <Trans>Account totals</Trans>
+                </td>
+                <td
+                  style={{
+                    padding: 12,
+                    borderTop: `1px solid ${theme.tableBorder}`,
+                  }}
+                />
+                <td
+                  style={{
+                    padding: 12,
+                    textAlign: 'right',
+                    borderTop: `1px solid ${theme.tableBorder}`,
+                    ...styles.tnum,
+                  }}
+                >
+                  <FinancialText>
+                    {format(displayData.totals.accountBalance, 'financial')}
+                  </FinancialText>
+                </td>
+                <td
+                  style={{
+                    padding: 12,
+                    textAlign: 'right',
+                    borderTop: `1px solid ${theme.tableBorder}`,
+                    ...styles.tnum,
+                  }}
+                >
+                  <FinancialText>
+                    {format(displayData.totals.accountAllocated, 'financial')}
+                  </FinancialText>
+                </td>
+                <td
+                  style={{
+                    padding: 12,
+                    textAlign: 'right',
+                    borderTop: `1px solid ${theme.tableBorder}`,
+                    color:
+                      displayData.totals.accountRemainder === 0
+                        ? theme.pageText
+                        : theme.noticeText,
+                    ...styles.tnum,
+                  }}
+                >
+                  <FinancialText>
+                    {format(displayData.totals.accountRemainder, 'financial')}
+                  </FinancialText>
+                </td>
+                {isHighAccountCount ? (
+                  <>
+                    <td
+                      style={{
+                        minWidth: 260,
+                        padding: 12,
+                        borderTop: `1px solid ${theme.tableBorder}`,
+                        color: theme.pageTextSubdued,
+                      }}
+                    >
+                      <Trans>Use each row's editor to adjust accounts.</Trans>
+                    </td>
+                    <td
+                      style={{
+                        minWidth: 140,
+                        padding: 12,
+                        borderTop: `1px solid ${theme.tableBorder}`,
+                      }}
+                    />
+                  </>
+                ) : (
+                  displayData.editableAccounts.map(account => (
+                    <td
+                      key={account.id}
+                      style={{
+                        minWidth: 140,
+                        padding: 12,
+                        borderTop: `1px solid ${theme.tableBorder}`,
+                        verticalAlign: 'top',
+                      }}
+                    >
+                      <Block style={{ ...styles.tnum, marginBottom: 4 }}>
+                        <FinancialText>
+                          {format(account.allocated, 'financial')}
+                        </FinancialText>
+                      </Block>
+                      <Text
+                        style={{
+                          ...styles.smallText,
+                          color:
+                            account.remainder === 0
+                              ? theme.pageTextSubdued
+                              : theme.noticeText,
+                        }}
+                      >
+                        <Trans>
+                          Remainder:{' '}
+                          <FinancialText>
+                            {format(account.remainder, 'financial')}
+                          </FinancialText>
+                        </Trans>
+                      </Text>
+                    </td>
+                  ))
+                )}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </View>
+    );
 
   return (
     <Page header={header} padding={0}>
@@ -1489,732 +2473,221 @@ export function FundsLocation() {
               <View
                 style={{
                   gap: 12,
-                  flexWrap: 'wrap',
-                  flexDirection: 'row',
+                  position: 'relative',
+                  zIndex: 4,
                 }}
               >
-                <SummaryStat
-                  label={t('Category balance total')}
-                  value={displayData.totals.categoryBalance}
-                />
-                <SummaryStat
-                  label={t('Allocated total')}
-                  value={displayData.totals.categoryAllocated}
-                />
-                <SummaryStat
-                  label={t('Category remainder')}
-                  value={displayData.totals.categoryRemainder}
-                  tone={
-                    displayData.totals.categoryRemainder === 0
-                      ? 'default'
-                      : displayData.totals.categoryRemainder > 0
-                        ? 'warning'
-                        : 'danger'
-                  }
-                />
-                <SummaryStat
-                  label={t('Editable account remainder')}
-                  value={editableAccountRemainder}
-                  tone={accountWarningCount === 0 ? 'default' : 'warning'}
-                />
-              </View>
-
-              <View
-                style={{
-                  gap: 12,
-                  flexDirection: isNarrowWidth ? 'column' : 'row',
-                  alignItems: isNarrowWidth ? 'stretch' : 'center',
-                }}
-              >
-                {/* <Block
-                  style={{
-                    flex: 1,
-                    padding: 12,
-                    border: `1px solid ${theme.pillBorder}`,
-                    backgroundColor: theme.noticeBackgroundLight,
-                  }}
-                >
-                  <Text>
-                    <Trans>
-                      {{ categoryWarningCount }} categories and{' '}
-                      {{ accountWarningCount }} accounts currently have a
-                      remainder.
-                    </Trans>
-                  </Text>
-                </Block> */}
-
-                {/* {displayData.readOnlyAccounts.length > 0 && (
-                  <Block
-                    style={{
-                      flex: 1,
-                      padding: 12,
-                      border: `1px solid ${theme.pillBorder}`,
-                    }}
-                  >
-                    <Block style={{ marginBottom: 8 }}>
-                      <strong>{t('Read-only accounts')}</strong>
-                    </Block>
-                    <View style={{ gap: 6 }}>
-                      {displayData.readOnlyAccounts.map(account => (
-                        <View
-                          key={account.id}
-                          style={{
-                            gap: 8,
-                            flexDirection: 'row',
-                            justifyContent: 'space-between',
-                          }}
-                        >
-                          <Text>{account.name}</Text>
-                          <FinancialText style={styles.tnum}>
-                            {format(account.balance, 'financial')}
-                          </FinancialText>
-                        </View>
-                      ))}
-                    </View>
-                  </Block>
-                )} */}
-              </View>
-
-              <View
-                style={{
-                  gap: 8,
-                  paddingBottom: 8,
-                  flexDirection: 'row',
-                  flexWrap: 'wrap',
-                  alignItems: 'stretch',
-                }}
-              >
-                <label
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 4,
-                    flex: '1 1 220px',
-                    minWidth: 220,
-                  }}
-                >
-                  <Text
-                    style={{
-                      ...styles.smallText,
-                      color: theme.pageTextSubdued,
-                    }}
-                  >
-                    <Trans>Filter by group</Trans>
-                  </Text>
-                  <select
-                    aria-label={t('Filter by group')}
-                    value={groupFilter}
-                    onChange={event => setGroupFilter(event.target.value)}
-                    style={{
-                      height: 36,
-                      padding: '0 10px',
-                      borderRadius: 4,
-                      border: `1px solid ${theme.tableBorder}`,
-                      backgroundColor: theme.tableBackground,
-                      color: theme.pageText,
-                    }}
-                  >
-                    <option value="">
-                      <Trans>All groups</Trans>
-                    </option>
-                    {groupFilterOptions.map(groupName => (
-                      <option key={groupName} value={groupName}>
-                        {groupName}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
                 <View
                   style={{
-                    flex: '2 1 280px',
-                    minWidth: 240,
-                    gap: 6,
+                    gap: 12,
+                    flexWrap: 'wrap',
+                    flexDirection: 'row',
                   }}
                 >
-                  <Text
-                    style={{
-                      ...styles.smallText,
-                      color: theme.pageTextSubdued,
-                    }}
-                  >
-                    <Trans>Filter by category</Trans>
-                  </Text>
-                  <Search
-                    value={categoryFilter}
-                    onChange={setCategoryFilter}
-                    placeholder={t('Filter categories')}
-                    width="100%"
+                  <SummaryStat
+                    label={t('Category balance total')}
+                    value={displayData.totals.categoryBalance}
+                  />
+                  <SummaryStat
+                    label={t('Allocated total')}
+                    value={displayData.totals.categoryAllocated}
+                  />
+                  <SummaryStat
+                    label={t('Category remainder')}
+                    value={displayData.totals.categoryRemainder}
+                    tone={
+                      displayData.totals.categoryRemainder === 0
+                        ? 'default'
+                        : displayData.totals.categoryRemainder > 0
+                          ? 'warning'
+                          : 'danger'
+                    }
+                  />
+                  <SummaryStat
+                    label={t('Editable account remainder')}
+                    value={editableAccountRemainder}
+                    tone={accountWarningCount === 0 ? 'default' : 'warning'}
                   />
                 </View>
+                {reportView === 'account' ? (
+                    <View
+                      style={{
+                        gap: 8,
+                        flexDirection: 'row',
+                        flexWrap: 'wrap',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Text
+                        style={{
+                          ...styles.smallText,
+                          color: theme.pageTextSubdued,
+                        }}
+                      >
+                        <Trans>View</Trans>
+                      </Text>
+                      <View style={{ gap: 8, flexDirection: 'row' }}>
+                        <Button
+                          variant="menu"
+                          onPress={() => setReportView('category')}
+                        >
+                          <Trans>By category</Trans>
+                        </Button>
+                        <Button
+                          variant="menuSelected"
+                          onPress={() => setReportView('account')}
+                        >
+                          <Trans>By account</Trans>
+                        </Button>
+                      </View>
+                    </View>
+                ) : null}
+                {reportView === 'category' ? (
+                    <View
+                      style={{
+                        gap: 12,
+                      }}
+                    >
+                      <View
+                        style={{
+                          gap: 12,
+                          flexDirection: 'row',
+                          alignItems: 'flex-end',
+                        }}
+                      >
+                        <View
+                          style={{
+                            gap: 8,
+                            flex: '0 0 auto',
+                          }}
+                        >
+                          <Text
+                            style={{
+                              ...styles.smallText,
+                              color: theme.pageTextSubdued,
+                            }}
+                          >
+                            <Trans>View</Trans>
+                          </Text>
+                          <View style={{ gap: 8, flexDirection: 'row' }}>
+                            <Button
+                              variant="menuSelected"
+                              onPress={() => setReportView('category')}
+                            >
+                              <Trans>By category</Trans>
+                            </Button>
+                            <Button
+                              variant="menu"
+                              onPress={() => setReportView('account')}
+                            >
+                              <Trans>By account</Trans>
+                            </Button>
+                          </View>
+                        </View>
 
-                {groupFilter !== '' || categoryFilter.trim() !== '' ? (
-                  <Button
-                    style={{
-                      alignSelf: isNarrowWidth ? 'stretch' : 'flex-end',
-                    }}
-                    onPress={() => {
-                      setGroupFilter('');
-                      setCategoryFilter('');
-                    }}
-                  >
-                    <Trans>Clear filters</Trans>
-                  </Button>
+                        <View
+                          style={{
+                            gap: 4,
+                            flex: 1,
+                          }}
+                        >
+                          <Text
+                            style={{
+                              ...styles.smallText,
+                              color: theme.pageTextSubdued,
+                            }}
+                          >
+                            <Trans>Filter by group</Trans>
+                          </Text>
+                          <select
+                            aria-label={t('Filter by group')}
+                            value={groupFilter}
+                            onChange={event => setGroupFilter(event.target.value)}
+                            style={{
+                              height: 36,
+                              width: '100%',
+                              padding: '0 10px',
+                              borderRadius: 4,
+                              border: `1px solid ${theme.tableBorder}`,
+                              backgroundColor: theme.tableBackground,
+                              color: theme.pageText,
+                            }}
+                          >
+                            <option value="">
+                              <Trans>All groups</Trans>
+                            </option>
+                            {groupFilterOptions.map(groupName => (
+                              <option key={groupName} value={groupName}>
+                                {groupName}
+                              </option>
+                            ))}
+                          </select>
+                        </View>
+
+                        <View
+                          style={{
+                            gap: 6,
+                            flex: 1,
+                          }}
+                        >
+                          <Text
+                            style={{
+                              ...styles.smallText,
+                              color: theme.pageTextSubdued,
+                            }}
+                          >
+                            <Trans>Filter by category</Trans>
+                          </Text>
+                          <Search
+                            value={categoryFilter}
+                            onChange={setCategoryFilter}
+                            placeholder={t('Filter categories')}
+                            width="100%"
+                          />
+                        </View>
+
+                        {hasActiveCategoryFilters ? (
+                          <View
+                            style={{
+                              gap: 6,
+                              flex: '0 0 auto',
+                            }}
+                          >
+                            <Text
+                              style={{
+                                ...styles.smallText,
+                                color: 'transparent',
+                                userSelect: 'none',
+                              }}
+                            >
+                              <Trans>Filter by category</Trans>
+                            </Text>
+                            <Button
+                              onPress={() => {
+                                setGroupFilter('');
+                                setCategoryFilter('');
+                              }}
+                            >
+                              <Trans>Clear filters</Trans>
+                            </Button>
+                          </View>
+                        ) : null}
+                      </View>
+                    </View>
                 ) : null}
               </View>
 
-              {displayData.categories.length === 0 ? (
-                <Block
-                  style={{
-                    padding: 16,
-                    border: `1px solid ${theme.pillBorder}`,
-                  }}
-                >
-                  <Trans>
-                    There are no positive category balances to allocate for this
-                    month.
-                  </Trans>
-                </Block>
-              ) : filteredSortedCategoryRows.length === 0 ? (
-                <Block
-                  style={{
-                    padding: 16,
-                    border: `1px solid ${theme.pillBorder}`,
-                  }}
-                >
-                  <Trans>No categories match the current filters.</Trans>
-                </Block>
-              ) : (
-                <div
-                  style={{
-                    overflowX: 'auto',
-                    overflowY: 'auto',
-                    maxHeight: isNarrowWidth
-                      ? undefined
-                      : 'calc(100vh - 320px)',
-                    border: `1px solid ${theme.pillBorder}`,
-                    backgroundColor: theme.tableBackground,
-                  }}
-                  data-testid="funds-location-table"
-                >
-                  <table
-                    style={{
-                      width: '100%',
-                      minWidth: reportTableMinWidth,
-                      borderCollapse: 'separate',
-                      borderSpacing: 0,
-                    }}
-                  >
-                    <thead>
-                      <tr>
-                        <th
-                          ref={setStickyHeaderRef('group')}
-                          style={{
-                            ...getStickyCellStyle(
-                              'group',
-                              stickyOffsets.group,
-                              { top: 0, zIndex: 5 },
-                            ),
-                            padding: 12,
-                            textAlign: 'left',
-                            borderBottom: `1px solid ${theme.tableBorder}`,
-                          }}
-                        >
-                          {renderReportSortHeader(t('Group'), 'group')}
-                        </th>
-                        <th
-                          ref={setStickyHeaderRef('category')}
-                          style={{
-                            ...getStickyCellStyle(
-                              'category',
-                              stickyOffsets.category,
-                              { top: 0, zIndex: 5 },
-                            ),
-                            padding: 12,
-                            textAlign: 'left',
-                            borderBottom: `1px solid ${theme.tableBorder}`,
-                          }}
-                        >
-                          {renderReportSortHeader(t('Category'), 'category')}
-                        </th>
-                        <th
-                          ref={setStickyHeaderRef('balance')}
-                          style={{
-                            ...getStickyCellStyle(
-                              'balance',
-                              stickyOffsets.balance,
-                              { top: 0, zIndex: 5 },
-                            ),
-                            padding: 12,
-                            textAlign: 'right',
-                            borderBottom: `1px solid ${theme.tableBorder}`,
-                          }}
-                        >
-                          {renderReportSortHeader(t('Balance'), 'balance', {
-                            align: 'right',
-                          })}
-                        </th>
-                        <th
-                          ref={setStickyHeaderRef('allocated')}
-                          style={{
-                            ...getStickyCellStyle(
-                              'allocated',
-                              stickyOffsets.allocated,
-                              { top: 0, zIndex: 5 },
-                            ),
-                            padding: 12,
-                            textAlign: 'right',
-                            borderBottom: `1px solid ${theme.tableBorder}`,
-                          }}
-                        >
-                          {renderReportSortHeader(t('Allocated'), 'allocated', {
-                            align: 'right',
-                          })}
-                        </th>
-                        <th
-                          ref={setStickyHeaderRef('remainder')}
-                          style={{
-                            ...getStickyCellStyle(
-                              'remainder',
-                              stickyOffsets.remainder,
-                              { top: 0, zIndex: 5 },
-                            ),
-                            padding: 12,
-                            textAlign: 'right',
-                            borderBottom: `1px solid ${theme.tableBorder}`,
-                          }}
-                        >
-                          {renderReportSortHeader(t('Remainder'), 'remainder', {
-                            align: 'right',
-                          })}
-                        </th>
-                        {isHighAccountCount ? (
-                          <>
-                            <th
-                              style={{
-                                minWidth: 260,
-                                padding: 12,
-                                verticalAlign: 'bottom',
-                                textAlign: 'left',
-                                borderBottom: `1px solid ${theme.tableBorder}`,
-                                position: 'sticky',
-                                top: 0,
-                                zIndex: 4,
-                                backgroundColor: theme.tableBackground,
-                              }}
-                            >
-                              {renderReportSortHeader(
-                                t('Allocation summary'),
-                                'summary',
-                              )}
-                            </th>
-                            <th
-                              style={{
-                                minWidth: 140,
-                                padding: 12,
-                                verticalAlign: 'bottom',
-                                textAlign: 'left',
-                                borderBottom: `1px solid ${theme.tableBorder}`,
-                                position: 'sticky',
-                                top: 0,
-                                zIndex: 4,
-                                backgroundColor: theme.tableBackground,
-                              }}
-                            >
-                              <Trans>Actions</Trans>
-                            </th>
-                          </>
-                        ) : (
-                          displayData.editableAccounts.map(account => (
-                            <th
-                              key={account.id}
-                              style={{
-                                minWidth: 140,
-                                padding: 12,
-                                verticalAlign: 'bottom',
-                                textAlign: 'left',
-                                borderBottom: `1px solid ${theme.tableBorder}`,
-                                position: 'sticky',
-                                top: 0,
-                                zIndex: 4,
-                                backgroundColor: theme.tableBackground,
-                              }}
-                            >
-                              {renderReportSortHeader(account.name, 'account', {
-                                accountId: account.id,
-                                subtitle: format(account.balance, 'financial'),
-                              })}
-                            </th>
-                          ))
-                        )}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredSortedCategoryRows.map(row => {
-                        const { category, summaryAllocations, accountAmounts } =
-                          row;
-                        const visibleSummaryAllocations =
-                          summaryAllocations.slice(0, 3);
-                        const hiddenSummaryCount =
-                          summaryAllocations.length -
-                          visibleSummaryAllocations.length;
-
-                        return (
-                          <tr key={category.id}>
-                            <td
-                              style={{
-                                ...getStickyCellStyle(
-                                  'group',
-                                  stickyOffsets.group,
-                                ),
-                                padding: 12,
-                                borderBottom: `1px solid ${theme.tableBorder}`,
-                              }}
-                            >
-                              {category.group_name}
-                            </td>
-                            <td
-                              style={{
-                                ...getStickyCellStyle(
-                                  'category',
-                                  stickyOffsets.category,
-                                ),
-                                padding: 12,
-                                borderBottom: `1px solid ${theme.tableBorder}`,
-                              }}
-                            >
-                              {category.name}
-                            </td>
-                            <td
-                              style={{
-                                ...getStickyCellStyle(
-                                  'balance',
-                                  stickyOffsets.balance,
-                                ),
-                                padding: 12,
-                                textAlign: 'right',
-                                borderBottom: `1px solid ${theme.tableBorder}`,
-                                ...styles.tnum,
-                              }}
-                            >
-                              <FinancialText>
-                                {format(category.balance, 'financial')}
-                              </FinancialText>
-                            </td>
-                            <td
-                              style={{
-                                ...getStickyCellStyle(
-                                  'allocated',
-                                  stickyOffsets.allocated,
-                                ),
-                                padding: 12,
-                                textAlign: 'right',
-                                borderBottom: `1px solid ${theme.tableBorder}`,
-                                color: category.isOverallocated
-                                  ? theme.errorText
-                                  : theme.pageText,
-                                ...styles.tnum,
-                              }}
-                            >
-                              <FinancialText>
-                                {format(category.allocated, 'financial')}
-                              </FinancialText>
-                            </td>
-                            <td
-                              style={{
-                                ...getStickyCellStyle(
-                                  'remainder',
-                                  stickyOffsets.remainder,
-                                ),
-                                padding: 12,
-                                textAlign: 'right',
-                                borderBottom: `1px solid ${theme.tableBorder}`,
-                                color:
-                                  category.remainder === 0
-                                    ? theme.pageText
-                                    : category.remainder > 0
-                                      ? theme.noticeText
-                                      : theme.errorText,
-                                ...styles.tnum,
-                              }}
-                            >
-                              <FinancialText>
-                                {format(category.remainder, 'financial')}
-                              </FinancialText>
-                            </td>
-                            {isHighAccountCount ? (
-                              <>
-                                <td
-                                  style={{
-                                    minWidth: 260,
-                                    padding: 12,
-                                    borderBottom: `1px solid ${theme.tableBorder}`,
-                                    verticalAlign: 'top',
-                                  }}
-                                >
-                                  {visibleSummaryAllocations.length > 0 ? (
-                                    <View style={{ gap: 4 }}>
-                                      {visibleSummaryAllocations.map(
-                                        allocation => (
-                                          <View
-                                            key={`${category.id}-${allocation.accountId}`}
-                                            style={{
-                                              gap: 8,
-                                              flexDirection: 'row',
-                                              justifyContent: 'space-between',
-                                            }}
-                                          >
-                                            <Text>
-                                              {allocation.accountName}
-                                            </Text>
-                                            <FinancialText style={styles.tnum}>
-                                              {format(
-                                                allocation.amount,
-                                                'financial',
-                                              )}
-                                            </FinancialText>
-                                          </View>
-                                        ),
-                                      )}
-                                      {hiddenSummaryCount > 0 ? (
-                                        <Text
-                                          style={{
-                                            ...styles.smallText,
-                                            color: theme.pageTextSubdued,
-                                          }}
-                                        >
-                                          {t('+{{count}} more', {
-                                            count: hiddenSummaryCount,
-                                          })}
-                                        </Text>
-                                      ) : null}
-                                    </View>
-                                  ) : (
-                                    <Text
-                                      style={{
-                                        color: theme.pageTextSubdued,
-                                      }}
-                                    >
-                                      <Trans>Unassigned</Trans>
-                                    </Text>
-                                  )}
-                                </td>
-                                <td
-                                  style={{
-                                    minWidth: 140,
-                                    padding: 12,
-                                    borderBottom: `1px solid ${theme.tableBorder}`,
-                                    verticalAlign: 'top',
-                                  }}
-                                >
-                                  <Button
-                                    onPress={() =>
-                                      openCategoryDialog(category.id)
-                                    }
-                                  >
-                                    <Trans>Edit accounts</Trans>
-                                  </Button>
-                                </td>
-                              </>
-                            ) : (
-                              displayData.editableAccounts.map(account => {
-                                const value = accountAmounts[account.id] ?? 0;
-                                const maxAllocation = getAllocationSliderMax({
-                                  currentValue: value,
-                                  categoryRemainder: category.remainder,
-                                  accountRemainder: account.remainder,
-                                });
-
-                                return (
-                                  <td
-                                    key={`${category.id}-${account.id}`}
-                                    style={{
-                                      minWidth: 140,
-                                      padding: 8,
-                                      borderBottom: `1px solid ${theme.tableBorder}`,
-                                    }}
-                                  >
-                                    <AllocationSlider
-                                      label={t(
-                                        '{{category}} allocation in {{account}}',
-                                        {
-                                          category: category.name,
-                                          account: account.name,
-                                        },
-                                      )}
-                                      value={value}
-                                      maxValue={maxAllocation}
-                                      onUpdate={nextValue =>
-                                        updateAllocation(
-                                          category.id,
-                                          account.id,
-                                          Math.min(nextValue, maxAllocation),
-                                        )
-                                      }
-                                    />
-                                  </td>
-                                );
-                              })
-                            )}
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                    <tfoot>
-                      <tr>
-                        <td
-                          style={{
-                            ...getStickyCellStyle(
-                              'group',
-                              stickyOffsets.group,
-                              { top: 'auto', zIndex: 3 },
-                            ),
-                            padding: 12,
-                            borderTop: `1px solid ${theme.tableBorder}`,
-                            fontWeight: 600,
-                          }}
-                        >
-                          <Trans>Account totals</Trans>
-                        </td>
-                        <td
-                          style={{
-                            ...getStickyCellStyle(
-                              'category',
-                              stickyOffsets.category,
-                              { top: 'auto', zIndex: 3 },
-                            ),
-                            padding: 12,
-                            borderTop: `1px solid ${theme.tableBorder}`,
-                          }}
-                        />
-                        <td
-                          style={{
-                            ...getStickyCellStyle(
-                              'balance',
-                              stickyOffsets.balance,
-                              { top: 'auto', zIndex: 3 },
-                            ),
-                            padding: 12,
-                            textAlign: 'right',
-                            borderTop: `1px solid ${theme.tableBorder}`,
-                            ...styles.tnum,
-                          }}
-                        >
-                          <FinancialText>
-                            {format(
-                              displayData.totals.accountBalance,
-                              'financial',
-                            )}
-                          </FinancialText>
-                        </td>
-                        <td
-                          style={{
-                            ...getStickyCellStyle(
-                              'allocated',
-                              stickyOffsets.allocated,
-                              { top: 'auto', zIndex: 3 },
-                            ),
-                            padding: 12,
-                            textAlign: 'right',
-                            borderTop: `1px solid ${theme.tableBorder}`,
-                            ...styles.tnum,
-                          }}
-                        >
-                          <FinancialText>
-                            {format(
-                              displayData.totals.accountAllocated,
-                              'financial',
-                            )}
-                          </FinancialText>
-                        </td>
-                        <td
-                          style={{
-                            ...getStickyCellStyle(
-                              'remainder',
-                              stickyOffsets.remainder,
-                              { top: 'auto', zIndex: 3 },
-                            ),
-                            padding: 12,
-                            textAlign: 'right',
-                            borderTop: `1px solid ${theme.tableBorder}`,
-                            color:
-                              displayData.totals.accountRemainder === 0
-                                ? theme.pageText
-                                : theme.noticeText,
-                            ...styles.tnum,
-                          }}
-                        >
-                          <FinancialText>
-                            {format(
-                              displayData.totals.accountRemainder,
-                              'financial',
-                            )}
-                          </FinancialText>
-                        </td>
-                        {isHighAccountCount ? (
-                          <>
-                            <td
-                              style={{
-                                minWidth: 260,
-                                padding: 12,
-                                borderTop: `1px solid ${theme.tableBorder}`,
-                                color: theme.pageTextSubdued,
-                              }}
-                            >
-                              <Trans>
-                                Use each row's editor to adjust accounts.
-                              </Trans>
-                            </td>
-                            <td
-                              style={{
-                                minWidth: 140,
-                                padding: 12,
-                                borderTop: `1px solid ${theme.tableBorder}`,
-                              }}
-                            />
-                          </>
-                        ) : (
-                          displayData.editableAccounts.map(account => (
-                            <td
-                              key={account.id}
-                              style={{
-                                minWidth: 140,
-                                padding: 12,
-                                borderTop: `1px solid ${theme.tableBorder}`,
-                                verticalAlign: 'top',
-                              }}
-                            >
-                              <Block
-                                style={{ ...styles.tnum, marginBottom: 4 }}
-                              >
-                                <FinancialText>
-                                  {format(account.allocated, 'financial')}
-                                </FinancialText>
-                              </Block>
-                              <Text
-                                style={{
-                                  ...styles.smallText,
-                                  color:
-                                    account.remainder === 0
-                                      ? theme.pageTextSubdued
-                                      : theme.noticeText,
-                                }}
-                              >
-                                <Trans>
-                                  Remainder:{' '}
-                                  <FinancialText>
-                                    {format(account.remainder, 'financial')}
-                                  </FinancialText>
-                                </Trans>
-                              </Text>
-                            </td>
-                          ))
-                        )}
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              )}
+              <View
+                style={{
+                  position: 'relative',
+                  zIndex: 0,
+                  isolation: 'isolate',
+                }}
+              >
+                {reportView === 'category'
+                  ? categoryReportContent
+                  : accountReportContent}
+              </View>
             </>
           )}
         </View>
