@@ -410,6 +410,9 @@ describe('FundsLocation', () => {
 
     expect(screen.getByText('Checking')).toBeInTheDocument();
     expect(
+      screen.queryByRole('button', { name: 'Save allocations' }),
+    ).not.toBeInTheDocument();
+    expect(
       screen.queryByRole('columnheader', { name: 'Allocation summary' }),
     ).not.toBeInTheDocument();
     expect(
@@ -643,6 +646,14 @@ describe('FundsLocation', () => {
         '2500',
       );
     });
+
+    await waitFor(() => {
+      expect(savedAllocations['2019-02']).toEqual(
+        expect.arrayContaining([
+          { categoryId: 'food', accountId: 'checking', amount: 2500 },
+        ]),
+      );
+    });
   });
 
   test('switching months carries over the latest saved snapshot', async () => {
@@ -671,7 +682,17 @@ describe('FundsLocation', () => {
       await screen.findByLabelText('Food allocation in Checking'),
     ).toHaveValue('3000');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Clear saved month' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Clear saved allocations' }),
+    );
+    const confirmationModal = await screen.findByTestId(
+      'funds-location-clear-saved-month-confirmation-modal',
+    );
+    fireEvent.click(
+      within(confirmationModal).getByRole('button', {
+        name: 'Clear saved allocations',
+      }),
+    );
 
     await waitFor(() => {
       expect(screen.getByLabelText('Food allocation in Checking')).toHaveValue(
@@ -696,8 +717,6 @@ describe('FundsLocation', () => {
       );
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save allocations' }));
-
     await waitFor(() => {
       expect(savedAllocations['2019-03']).toEqual(
         expect.arrayContaining([
@@ -707,7 +726,17 @@ describe('FundsLocation', () => {
       );
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Clear saved month' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Clear saved allocations' }),
+    );
+    const confirmationModal = await screen.findByTestId(
+      'funds-location-clear-saved-month-confirmation-modal',
+    );
+    fireEvent.click(
+      within(confirmationModal).getByRole('button', {
+        name: 'Clear saved allocations',
+      }),
+    );
 
     await waitFor(() => {
       expect(screen.getByLabelText('Food allocation in Checking')).toHaveValue(
@@ -732,6 +761,33 @@ describe('FundsLocation', () => {
     });
   });
 
+  test('clear saved month confirmation can be cancelled', async () => {
+    renderFundsLocation();
+
+    expect(
+      await screen.findByLabelText('Food allocation in Checking'),
+    ).toHaveValue('3000');
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Clear saved allocations' }),
+    );
+
+    expect(screen.getByText('Clear saved allocations?')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByText('Clear saved allocations?')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Food allocation in Checking')).toHaveValue(
+      '3000',
+    );
+    expect(savedAllocations['2019-02']).toEqual(
+      expect.arrayContaining([
+        { categoryId: 'food', accountId: 'checking', amount: 3000 },
+        { categoryId: 'utilities', accountId: 'savings', amount: 1200 },
+      ]),
+    );
+  });
+
   test('carry-over filters out accounts and categories that are not valid this month', async () => {
     useFilteredCarryOverFixture();
     setupMockServer();
@@ -750,8 +806,6 @@ describe('FundsLocation', () => {
 
     expect(screen.queryByText('Utilities')).not.toBeInTheDocument();
     expect(screen.queryByText('Savings')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save allocations' }));
 
     await waitFor(() => {
       expect(savedAllocations['2019-03']).toEqual([
@@ -821,7 +875,7 @@ describe('FundsLocation', () => {
     expect(getReportCategoryNames()).toEqual(['Vacation', 'Utilities', 'Food']);
   });
 
-  test('dialog search filters account rows and cancel discards changes', async () => {
+  test('dialog search filters account rows and autosaves changes', async () => {
     useHighAccountFixture();
     setupMockServer();
 
@@ -855,7 +909,16 @@ describe('FundsLocation', () => {
         target: { value: '250' },
       },
     );
-    fireEvent.click(within(modal).getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => {
+      expect(savedAllocations['2019-02']).toEqual(
+        expect.arrayContaining([
+          { categoryId: 'food', accountId: 'account-12', amount: 250 },
+        ]),
+      );
+    });
+
+    fireEvent.click(within(modal).getByRole('button', { name: 'Close' }));
 
     fireEvent.click(
       within(getCategoryRow('Food')).getByRole('button', {
@@ -871,7 +934,7 @@ describe('FundsLocation', () => {
     ).toHaveValue('3000');
     expect(
       within(reopenedModal).getByLabelText('Food allocation in Account 12'),
-    ).toHaveValue('0');
+    ).toHaveValue('250');
   });
 
   test('default modal order stays stable while sliders are edited', async () => {
@@ -934,7 +997,7 @@ describe('FundsLocation', () => {
     expect(reverseSortedNames.at(-1)).toBe('Account 01');
   });
 
-  test('dialog clear row only clears the selected category', async () => {
+  test('dialog clear rows only clears the selected category after confirmation', async () => {
     useHighAccountFixture();
     setupMockServer();
 
@@ -950,8 +1013,14 @@ describe('FundsLocation', () => {
     const modal = await screen.findByTestId(
       'funds-location-category-allocation-modal',
     );
-    fireEvent.click(within(modal).getByRole('button', { name: 'Clear row' }));
-    fireEvent.click(within(modal).getByRole('button', { name: 'Apply' }));
+    fireEvent.click(within(modal).getByRole('button', { name: 'Clear rows' }));
+    const confirmationModal = await screen.findByTestId(
+      'funds-location-clear-dialog-rows-confirmation-modal',
+    );
+    fireEvent.click(
+      within(confirmationModal).getByRole('button', { name: 'Clear rows' }),
+    );
+    fireEvent.click(within(modal).getByRole('button', { name: 'Close' }));
 
     await waitFor(() => {
       expect(
@@ -962,7 +1031,7 @@ describe('FundsLocation', () => {
     expect(getCategoryRow('Utilities')).toHaveTextContent('400');
   });
 
-  test('dialog apply updates the main table and save persists after reload', async () => {
+  test('dialog updates the main table and persists after reload', async () => {
     useHighAccountFixture();
     setupMockServer();
 
@@ -991,7 +1060,7 @@ describe('FundsLocation', () => {
         target: { value: '1500' },
       },
     );
-    fireEvent.click(within(modal).getByRole('button', { name: 'Apply' }));
+    fireEvent.click(within(modal).getByRole('button', { name: 'Close' }));
 
     await waitFor(() => {
       expect(getCategoryRow('Food')).toHaveTextContent('5500');
@@ -999,8 +1068,6 @@ describe('FundsLocation', () => {
     expect(getCategoryRow('Food')).toHaveTextContent('1500');
     expect(getCategoryRow('Food')).toHaveTextContent('Account 04');
     expect(getCategoryRow('Food')).not.toHaveTextContent('+1 more');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save allocations' }));
 
     await waitFor(() => {
       expect(savedAllocations['2019-02']).toEqual(
@@ -1074,8 +1141,7 @@ describe('FundsLocation', () => {
         within(modal).getByLabelText('Food allocation in Account 12'),
       ).toHaveValue('250');
     });
-
-    fireEvent.click(within(modal).getByRole('button', { name: 'Apply' }));
+    fireEvent.click(within(modal).getByRole('button', { name: 'Close' }));
 
     fireEvent.click(
       within(getCategoryRow('Food')).getByRole('button', {

@@ -72,7 +72,6 @@ type MobileFundsLocationPageProps = {
   selectedMonth: string;
   monthBounds: { start: string; end: string };
   clearDisabled: boolean;
-  saveDisabled: boolean;
   supported: boolean;
   totalCategoriesCount: number;
   selectedCategory: MobileSelectedCategory | null;
@@ -98,7 +97,6 @@ type MobileFundsLocationPageProps = {
   onSelectMonth: (month: string) => void;
   onChangeReportView: (view: 'category' | 'account') => void;
   onClearSavedMonth: () => void;
-  onSave: () => void;
   onChangeGroupFilter: (value: string) => void;
   onChangeCategoryFilter: (value: string) => void;
   onClearFilters: () => void;
@@ -107,7 +105,6 @@ type MobileFundsLocationPageProps = {
   onUpdateDialogAllocation: (accountId: string, amount: number) => void;
   onClearDialogRow: () => void;
   onCloseCategoryDialog: () => void;
-  onApplyDialogAllocations: () => void;
 };
 
 function getBreakdownOpacity(index: number) {
@@ -716,7 +713,6 @@ export function MobileFundsLocationPage({
   selectedMonth,
   monthBounds,
   clearDisabled,
-  saveDisabled,
   supported,
   totalCategoriesCount,
   selectedCategory,
@@ -735,7 +731,6 @@ export function MobileFundsLocationPage({
   onSelectMonth,
   onChangeReportView,
   onClearSavedMonth,
-  onSave,
   onChangeGroupFilter,
   onChangeCategoryFilter,
   onClearFilters,
@@ -744,7 +739,6 @@ export function MobileFundsLocationPage({
   onUpdateDialogAllocation,
   onClearDialogRow,
   onCloseCategoryDialog,
-  onApplyDialogAllocations,
 }: MobileFundsLocationPageProps) {
   const { t } = useTranslation();
   const hasActiveFilters = groupFilter !== '' || categoryFilter.trim() !== '';
@@ -784,18 +778,8 @@ export function MobileFundsLocationPage({
 
             <View style={{ gap: 8 }}>
               <Button isDisabled={clearDisabled} onPress={onClearSavedMonth}>
-                <Trans>Clear saved month</Trans>
+                <Trans>Clear saved allocations</Trans>
               </Button>
-
-              {supported ? (
-                <Button
-                  variant="primary"
-                  isDisabled={saveDisabled}
-                  onPress={onSave}
-                >
-                  <Trans>Save allocations</Trans>
-                </Button>
-              ) : null}
             </View>
           </View>
         </Block>
@@ -1078,38 +1062,13 @@ export function MobileFundsLocationPage({
                   <Button
                     onPress={onClearDialogRow}
                     style={{
-                      flex: 1.2,
-                      minHeight: 36,
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <Text style={{ lineHeight: 1.2, whiteSpace: 'nowrap' }}>
-                      <Trans>Clear row</Trans>
-                    </Text>
-                  </Button>
-                  <Button
-                    onPress={onCloseCategoryDialog}
-                    style={{
                       flex: 1,
                       minHeight: 36,
                       justifyContent: 'center',
                     }}
                   >
                     <Text style={{ lineHeight: 1.2, whiteSpace: 'nowrap' }}>
-                      <Trans>Cancel</Trans>
-                    </Text>
-                  </Button>
-                  <Button
-                    variant="primary"
-                    onPress={onApplyDialogAllocations}
-                    style={{
-                      flex: 1,
-                      minHeight: 36,
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <Text style={{ lineHeight: 1.2, whiteSpace: 'nowrap' }}>
-                      <Trans>Apply</Trans>
+                      <Trans>Clear rows</Trans>
                     </Text>
                   </Button>
                 </View>

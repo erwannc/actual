@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 
@@ -99,6 +99,12 @@ type ReportSortState = {
   accountId?: string;
 };
 
+type SaveMutationVariables = {
+  month: string;
+  allocations: FundsLocationAllocationInput[];
+  silent?: boolean;
+};
+
 function renderSortDirectionIcon(direction: 'asc' | 'desc') {
   const Icon = direction === 'asc' ? SvgArrowDown : SvgArrowUp;
 
@@ -197,18 +203,6 @@ async function findCarriedOverDraftAllocationMap({
   }
 
   return {};
-}
-
-function serializeDraftAllocationMap(draftAllocations: DraftAllocationMap) {
-  return JSON.stringify(
-    Object.values(draftAllocations)
-      .filter(allocation => allocation.amount !== 0)
-      .sort((left, right) =>
-        `${left.categoryId}:${left.accountId}`.localeCompare(
-          `${right.categoryId}:${right.accountId}`,
-        ),
-      ),
-  );
 }
 
 function toDraftAllocationArray(
@@ -538,7 +532,7 @@ function CompactBreakdownSummary({
 }: {
   items: Array<{
     id: string;
-    label: string;
+    label: React.ReactNode;
     amount: number;
   }>;
   emptyLabel: string;
@@ -993,6 +987,7 @@ export function FundsLocation() {
   const [draftAllocations, setDraftAllocations] = useState<DraftAllocationMap>(
     {},
   );
+  const draftAllocationsRef = useRef<DraftAllocationMap>({});
   const [reportSort, setReportSort] = useState<ReportSortState>({
     column: 'default',
     direction: getDefaultReportSortDirection('default'),
@@ -1002,9 +997,22 @@ export function FundsLocation() {
   const [groupFilter, setGroupFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [accountFilter, setAccountFilter] = useState('');
+  const [isClearSavedMonthConfirmationOpen, setIsClearSavedMonthConfirmationOpen] =
+    useState(false);
+  const [isClearDialogRowsConfirmationOpen, setIsClearDialogRowsConfirmationOpen] =
+    useState(false);
   const [categoryDialogState, setCategoryDialogState] =
     useState<CategoryDialogState | null>(null);
+  const categoryDialogStateRef = useRef<CategoryDialogState | null>(null);
   const [dialogSearch, setDialogSearch] = useState('');
+
+  useEffect(() => {
+    draftAllocationsRef.current = draftAllocations;
+  }, [draftAllocations]);
+
+  useEffect(() => {
+    categoryDialogStateRef.current = categoryDialogState;
+  }, [categoryDialogState]);
   useEffect(() => {
     if (!allMonths || allMonths.length === 0) {
       return;
@@ -1054,6 +1062,17 @@ export function FundsLocation() {
 
       if (!isCancelled) {
         setDraftAllocations(nextDraftAllocations);
+
+        if (
+          !currentMonthData.hasSavedSnapshot &&
+          Object.keys(nextDraftAllocations).length > 0
+        ) {
+          saveMutation.mutate({
+            month,
+            allocations: toDraftAllocationArray(nextDraftAllocations),
+            silent: true,
+          });
+        }
       }
     }
 
@@ -1067,6 +1086,8 @@ export function FundsLocation() {
   useEffect(() => {
     setCategoryDialogState(null);
     setDialogSearch('');
+    setIsClearSavedMonthConfirmationOpen(false);
+    setIsClearDialogRowsConfirmationOpen(false);
   }, [resolvedMonth]);
 
   const displayData = useMemo(() => {
@@ -1330,19 +1351,15 @@ export function FundsLocation() {
   const saveMutation = useMutation<
     FundsLocationMonthEntity,
     Error,
-    FundsLocationAllocationInput[]
+    SaveMutationVariables
   >({
-    mutationFn: async (allocations: FundsLocationAllocationInput[]) => {
-      if (!resolvedMonth) {
-        throw new Error('Month is required to save funds location data');
-      }
-
+    mutationFn: async ({ month, allocations }: SaveMutationVariables) => {
       return await send('funds-location/save-month', {
-        month: resolvedMonth,
+        month,
         allocations,
       });
     },
-    onSuccess: async data => {
+    onSuccess: async (data, variables) => {
       queryClient.setQueryData(
         fundsLocationQueries.month(data.month).queryKey,
         data,
@@ -1350,16 +1367,67 @@ export function FundsLocation() {
       await queryClient.invalidateQueries({
         queryKey: fundsLocationQueries.all(),
       });
-      dispatch(
-        addNotification({
-          notification: {
-            type: 'message',
-            message: t('Funds location saved.'),
-          },
-        }),
-      );
+      if (!variables.silent) {
+        dispatch(
+          addNotification({
+            notification: {
+              type: 'message',
+              message: t('Funds location saved.'),
+            },
+          }),
+        );
+      }
     },
   });
+
+  const pendingAutoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelPendingAutoSave = () => {
+    if (pendingAutoSaveRef.current) {
+      clearTimeout(pendingAutoSaveRef.current);
+      pendingAutoSaveRef.current = null;
+    }
+  };
+
+  const persistAllocations = ({
+    month,
+    allocations,
+    silent = false,
+  }: SaveMutationVariables) => {
+    cancelPendingAutoSave();
+    saveMutation.mutate({
+      month,
+      allocations,
+      silent,
+    });
+  };
+
+  const scheduleAutoSave = ({
+    month,
+    nextDraftAllocations,
+  }: {
+    month: string;
+    nextDraftAllocations: DraftAllocationMap;
+  }) => {
+    cancelPendingAutoSave();
+    pendingAutoSaveRef.current = setTimeout(() => {
+      saveMutation.mutate({
+        month,
+        allocations: toDraftAllocationArray(nextDraftAllocations),
+        silent: true,
+      });
+      pendingAutoSaveRef.current = null;
+    }, 300);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (pendingAutoSaveRef.current) {
+        clearTimeout(pendingAutoSaveRef.current);
+        pendingAutoSaveRef.current = null;
+      }
+    };
+  }, []);
 
   const monthBounds = useMemo(() => {
     if (!allMonths || allMonths.length === 0) {
@@ -1372,19 +1440,6 @@ export function FundsLocation() {
       end: allMonths[allMonths.length - 1],
     };
   }, [allMonths]);
-
-  const initialSerialized = useMemo(
-    () =>
-      serializeDraftAllocationMap(
-        buildDraftAllocationMap(monthData?.allocations ?? []),
-      ),
-    [monthData?.allocations],
-  );
-  const draftSerialized = useMemo(
-    () => serializeDraftAllocationMap(draftAllocations),
-    [draftAllocations],
-  );
-  const isDirty = initialSerialized !== draftSerialized;
 
   const accountWarningCount =
     displayData?.editableAccounts.filter(account => account.remainder !== 0)
@@ -1543,21 +1598,34 @@ export function FundsLocation() {
     accountId: string,
     amount: number,
   ) => {
+    if (!resolvedMonth) {
+      return;
+    }
+
     setDraftAllocations(current => {
       const key = getFundsLocationAllocationKey(categoryId, accountId);
+      let nextDraftAllocations: DraftAllocationMap;
+
       if (amount === 0) {
         const { [key]: _removed, ...rest } = current;
-        return rest;
+        nextDraftAllocations = rest;
+      } else {
+        nextDraftAllocations = {
+          ...current,
+          [key]: {
+            categoryId,
+            accountId,
+            amount,
+          },
+        };
       }
 
-      return {
-        ...current,
-        [key]: {
-          categoryId,
-          accountId,
-          amount,
-        },
-      };
+      scheduleAutoSave({
+        month: resolvedMonth,
+        nextDraftAllocations,
+      });
+
+      return nextDraftAllocations;
     });
   };
 
@@ -1589,20 +1657,82 @@ export function FundsLocation() {
   const closeCategoryDialog = () => {
     setCategoryDialogState(null);
     setDialogSearch('');
+    setIsClearDialogRowsConfirmationOpen(false);
+  };
+
+  const syncCategoryDialogAllocations = (
+    accountAllocations: Record<string, number>,
+    options?: {
+      immediate?: boolean;
+    },
+  ) => {
+    const currentDialogState = categoryDialogStateRef.current;
+    if (!currentDialogState || !displayData || !resolvedMonth) {
+      return;
+    }
+
+    const selectedCategory = displayData.categories.find(
+      category => category.id === currentDialogState.categoryId,
+    );
+    const nextDialogAllocatedTotal = Object.values(accountAllocations).reduce(
+      (sum, value) => sum + value,
+      0,
+    );
+    const nextDialogRemainder =
+      selectedCategory?.balance != null
+        ? selectedCategory.balance - nextDialogAllocatedTotal
+        : 0;
+    const nextDraftAllocations = replaceCategoryDraftAllocations({
+      draftAllocations: draftAllocationsRef.current,
+      categoryId: currentDialogState.categoryId,
+      accountAllocations,
+    });
+    const nextMaxAvailableOrder =
+      currentDialogState.sortColumn === 'maxAvailable'
+        ? getDialogMaxAvailableOrder({
+          editableAccounts: displayData.editableAccounts,
+          categoryId: currentDialogState.categoryId,
+          allocations: accountAllocations,
+          draftAllocations: nextDraftAllocations,
+          categoryRemainder: nextDialogRemainder,
+          sortDirection: currentDialogState.sortDirection,
+        })
+        : currentDialogState.maxAvailableOrder;
+    const nextDialogState = {
+      ...currentDialogState,
+      allocations: accountAllocations,
+      maxAvailableOrder: nextMaxAvailableOrder,
+    };
+
+    categoryDialogStateRef.current = nextDialogState;
+    draftAllocationsRef.current = nextDraftAllocations;
+    setCategoryDialogState(nextDialogState);
+    setDraftAllocations(nextDraftAllocations);
+
+    if (options?.immediate) {
+      persistAllocations({
+        month: resolvedMonth,
+        allocations: toDraftAllocationArray(nextDraftAllocations),
+        silent: true,
+      });
+    } else {
+      scheduleAutoSave({
+        month: resolvedMonth,
+        nextDraftAllocations,
+      });
+    }
   };
 
   const updateDialogAllocation = (accountId: string, amount: number) => {
-    setCategoryDialogState(current =>
-      current
-        ? {
-          ...current,
-          allocations: {
-            ...current.allocations,
-            [accountId]: amount,
-          },
-        }
-        : current,
-    );
+    const currentDialogState = categoryDialogStateRef.current;
+    if (!currentDialogState) {
+      return;
+    }
+
+    syncCategoryDialogAllocations({
+      ...currentDialogState.allocations,
+      [accountId]: amount,
+    });
   };
 
   const updateDialogSort = (column: DialogSortColumn) => {
@@ -1686,31 +1816,19 @@ export function FundsLocation() {
   };
 
   const clearDialogRow = () => {
-    if (!displayData || !categoryDialogState) {
+    const currentDialogState = categoryDialogStateRef.current;
+    if (!displayData || !currentDialogState) {
       return;
     }
 
-    setCategoryDialogState({
-      ...categoryDialogState,
-      allocations: Object.fromEntries(
+    syncCategoryDialogAllocations(
+      Object.fromEntries(
         displayData.editableAccounts.map(account => [account.id, 0]),
       ),
-    });
-  };
-
-  const applyDialogAllocations = () => {
-    if (!categoryDialogState) {
-      return;
-    }
-
-    setDraftAllocations(current =>
-      replaceCategoryDraftAllocations({
-        draftAllocations: current,
-        categoryId: categoryDialogState.categoryId,
-        accountAllocations: categoryDialogState.allocations,
-      }),
+      {
+        immediate: true,
+      },
     );
-    closeCategoryDialog();
   };
 
   const renderDialogSortHeader = (
@@ -1855,7 +1973,37 @@ export function FundsLocation() {
     saveMutation.isPending ||
     !currentMonthData.hasSavedSnapshot ||
     currentMonthData.allocations.length === 0;
-  const saveAllocationsDisabled = saveMutation.isPending || !isDirty;
+  const openClearSavedMonthConfirmation = () => {
+    if (clearSavedMonthDisabled) {
+      return;
+    }
+
+    setIsClearSavedMonthConfirmationOpen(true);
+  };
+  const closeClearSavedMonthConfirmation = () => {
+    setIsClearSavedMonthConfirmationOpen(false);
+  };
+  const confirmClearSavedMonth = () => {
+    persistAllocations({
+      month: currentMonthData.month,
+      allocations: [],
+    });
+    closeClearSavedMonthConfirmation();
+  };
+  const openClearDialogRowsConfirmation = () => {
+    if (!selectedDialogCategory || !categoryDialogState) {
+      return;
+    }
+
+    setIsClearDialogRowsConfirmationOpen(true);
+  };
+  const closeClearDialogRowsConfirmation = () => {
+    setIsClearDialogRowsConfirmationOpen(false);
+  };
+  const confirmClearDialogRows = () => {
+    clearDialogRow();
+    closeClearDialogRowsConfirmation();
+  };
   const editableAccountRemainder = displayData.editableAccounts.reduce(
     (sum, account) => sum + account.remainder,
     0,
@@ -1872,7 +2020,6 @@ export function FundsLocation() {
           selectedMonth={selectedMonth}
           monthBounds={monthBounds}
           clearDisabled={clearSavedMonthDisabled}
-          saveDisabled={saveAllocationsDisabled}
           supported={displayData.supported}
           totalCategoriesCount={displayData.categories.length}
           selectedCategory={
@@ -1907,8 +2054,7 @@ export function FundsLocation() {
           dialogAccountRows={dialogAccountRows}
           onSelectMonth={setSelectedMonth}
           onChangeReportView={setReportView}
-          onClearSavedMonth={() => saveMutation.mutate([])}
-          onSave={() => saveMutation.mutate(toDraftAllocationArray(draftAllocations))}
+          onClearSavedMonth={openClearSavedMonthConfirmation}
           onChangeGroupFilter={setGroupFilter}
           onChangeCategoryFilter={setCategoryFilter}
           onClearFilters={() => {
@@ -1918,10 +2064,51 @@ export function FundsLocation() {
           onOpenCategory={openCategoryDialog}
           onChangeDialogSearch={setDialogSearch}
           onUpdateDialogAllocation={updateDialogAllocation}
-          onClearDialogRow={clearDialogRow}
+          onClearDialogRow={openClearDialogRowsConfirmation}
           onCloseCategoryDialog={closeCategoryDialog}
-          onApplyDialogAllocations={applyDialogAllocations}
         />
+        {isClearSavedMonthConfirmationOpen ? (
+          <Modal
+            name="funds-location-clear-saved-month-confirmation"
+            onClose={closeClearSavedMonthConfirmation}
+          >
+            <ModalHeader
+              title={t('Clear saved allocations?')}
+              rightContent={
+                <ModalCloseButton
+                  onPress={closeClearSavedMonthConfirmation}
+                />
+              }
+            />
+
+            <View style={{ gap: 12, lineHeight: 1.5 }}>
+              <Text>
+                <Trans>
+                  This will remove the saved allocations for{' '}
+                  <strong>{currentMonthData.month}</strong>.
+                </Trans>
+              </Text>
+              <Text style={{ color: theme.pageTextSubdued }}>
+                <Trans>You can’t undo this action.</Trans>
+              </Text>
+
+              <ModalButtons>
+                <View style={{ gap: 8, flexDirection: 'row' }}>
+                  <Button onPress={closeClearSavedMonthConfirmation}>
+                    <Trans>Cancel</Trans>
+                  </Button>
+                  <Button
+                    variant="primary"
+                    isDisabled={saveMutation.isPending}
+                    onPress={confirmClearSavedMonth}
+                  >
+                    <Trans>Clear saved allocations</Trans>
+                  </Button>
+                </View>
+              </ModalButtons>
+            </View>
+          </Modal>
+        ) : null}
       </Page>
     );
   }
@@ -2547,18 +2734,9 @@ export function FundsLocation() {
             >
               <Button
                 isDisabled={clearSavedMonthDisabled}
-                onPress={() => saveMutation.mutate([])}
+                onPress={openClearSavedMonthConfirmation}
               >
-                <Trans>Clear saved month</Trans>
-              </Button>
-              <Button
-                variant="primary"
-                isDisabled={saveAllocationsDisabled}
-                onPress={() =>
-                  saveMutation.mutate(toDraftAllocationArray(draftAllocations))
-                }
-              >
-                <Trans>Save allocations</Trans>
+                <Trans>Clear saved allocations</Trans>
               </Button>
             </View>
           </View>
@@ -3090,17 +3268,86 @@ export function FundsLocation() {
 
             <ModalButtons
               leftContent={
-                <Button onPress={clearDialogRow}>
-                  <Trans>Clear row</Trans>
+                <Button onPress={openClearDialogRowsConfirmation}>
+                  <Trans>Clear rows</Trans>
                 </Button>
               }
             >
+              <></>
+            </ModalButtons>
+          </View>
+        </Modal>
+      ) : null}
+      {isClearSavedMonthConfirmationOpen ? (
+        <Modal
+          name="funds-location-clear-saved-month-confirmation"
+          onClose={closeClearSavedMonthConfirmation}
+        >
+          <ModalHeader
+            title={t('Clear saved allocations?')}
+            rightContent={
+              <ModalCloseButton onPress={closeClearSavedMonthConfirmation} />
+            }
+          />
+
+          <View style={{ gap: 12, lineHeight: 1.5 }}>
+            <Text>
+              <Trans>
+                This will remove the saved allocations for{' '}
+                <strong>{currentMonthData.month}</strong>.
+              </Trans>
+            </Text>
+            <Text style={{ color: theme.pageTextSubdued }}>
+              <Trans>You can’t undo this action.</Trans>
+            </Text>
+
+            <ModalButtons>
               <View style={{ gap: 8, flexDirection: 'row' }}>
-                <Button onPress={closeCategoryDialog}>
+                <Button onPress={closeClearSavedMonthConfirmation}>
                   <Trans>Cancel</Trans>
                 </Button>
-                <Button variant="primary" onPress={applyDialogAllocations}>
-                  <Trans>Apply</Trans>
+                <Button
+                  variant="primary"
+                  isDisabled={saveMutation.isPending}
+                  onPress={confirmClearSavedMonth}
+                >
+                  <Trans>Clear saved allocations</Trans>
+                </Button>
+              </View>
+            </ModalButtons>
+          </View>
+        </Modal>
+      ) : null}
+      {selectedDialogCategory && isClearDialogRowsConfirmationOpen ? (
+        <Modal
+          name="funds-location-clear-dialog-rows-confirmation"
+          onClose={closeClearDialogRowsConfirmation}
+        >
+          <ModalHeader
+            title={t('Clear rows?')}
+            rightContent={
+              <ModalCloseButton onPress={closeClearDialogRowsConfirmation} />
+            }
+          />
+
+          <View style={{ gap: 12, lineHeight: 1.5 }}>
+            <Text>
+              <Trans>
+                This will remove all account allocations for{' '}
+                <strong>{selectedDialogCategory.name}</strong>.
+              </Trans>
+            </Text>
+            <Text style={{ color: theme.pageTextSubdued }}>
+              <Trans>You can’t undo this action.</Trans>
+            </Text>
+
+            <ModalButtons>
+              <View style={{ gap: 8, flexDirection: 'row' }}>
+                <Button onPress={closeClearDialogRowsConfirmation}>
+                  <Trans>Cancel</Trans>
+                </Button>
+                <Button variant="primary" onPress={confirmClearDialogRows}>
+                  <Trans>Clear rows</Trans>
                 </Button>
               </View>
             </ModalButtons>
