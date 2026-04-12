@@ -491,6 +491,221 @@ function CompactCapacity({
   );
 }
 
+function getAllocationSummaryOpacity(index: number) {
+  switch (index) {
+    case 0:
+      return 1;
+    case 1:
+      return 0.78;
+    case 2:
+      return 0.58;
+    default:
+      return 0.36;
+  }
+}
+
+function CompactBreakdownSummary({
+  items,
+  emptyLabel,
+  textColor,
+  subduedColor,
+  trackColor,
+  separatorColor,
+}: {
+  items: Array<{
+    id: string;
+    label: string;
+    amount: number;
+  }>;
+  emptyLabel: string;
+  textColor: string;
+  subduedColor: string;
+  trackColor: string;
+  separatorColor: string;
+}) {
+  const format = useFormat();
+  const { t } = useTranslation();
+  const [isExpanded, setIsExpanded] = useState(false);
+  const totalAllocated = items.reduce((sum, item) => sum + item.amount, 0);
+  const collapsedVisibleCount = 3;
+  const hiddenItemCount = Math.max(0, items.length - collapsedVisibleCount);
+  const visibleItems = isExpanded ? items : items.slice(0, collapsedVisibleCount);
+
+  if (visibleItems.length === 0 || totalAllocated <= 0) {
+    return (
+      <Text
+        style={{
+          color: subduedColor,
+        }}
+      >
+        {emptyLabel}
+      </Text>
+    );
+  }
+
+  return (
+    <View style={{ gap: 8 }}>
+      <div
+        aria-hidden="true"
+        style={{
+          display: 'flex',
+          height: 8,
+          width: '100%',
+          overflow: 'hidden',
+          borderRadius: 999,
+          backgroundColor: trackColor,
+        }}
+      >
+        {items.map((item, index) => (
+          <div
+            key={`${item.id}-segment`}
+            style={{
+              width: `${(item.amount / totalAllocated) * 100}%`,
+              minWidth: 0,
+              backgroundColor: theme.reportsBlue,
+              opacity: getAllocationSummaryOpacity(index),
+              borderRight:
+                index < items.length - 1
+                  ? `1px solid ${separatorColor}`
+                  : undefined,
+            }}
+          />
+        ))}
+      </div>
+
+      <View style={{ gap: 6 }}>
+        {visibleItems.map((item, index) => (
+          <View
+            key={item.id}
+            style={{
+              gap: 4,
+            }}
+          >
+            <View
+              style={{
+                gap: 8,
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                alignItems: 'baseline',
+              }}
+            >
+              <Text style={{ color: textColor }}>{item.label}</Text>
+              <FinancialText style={{ ...styles.tnum, color: textColor }}>
+                {format(item.amount, 'financial')}
+              </FinancialText>
+            </View>
+
+            <div
+              aria-hidden="true"
+              style={{
+                height: 4,
+                width: '100%',
+                overflow: 'hidden',
+                borderRadius: 999,
+                backgroundColor: trackColor,
+              }}
+            >
+              <div
+                style={{
+                  height: '100%',
+                  width: `${(item.amount / totalAllocated) * 100}%`,
+                  borderRadius: 999,
+                  backgroundColor: theme.reportsBlue,
+                  opacity: getAllocationSummaryOpacity(index),
+                }}
+              />
+            </div>
+          </View>
+        ))}
+
+        {hiddenItemCount > 0 ? (
+          <Button
+            variant="bare"
+            onPress={() => setIsExpanded(current => !current)}
+            style={{
+              minWidth: 0,
+              justifyContent: 'flex-start',
+              padding: 0,
+              color: subduedColor,
+            }}
+          >
+            <Text
+              style={{
+                ...styles.smallText,
+                color: subduedColor,
+              }}
+            >
+              {isExpanded
+                ? t('Show less')
+                : t('+{{count}} more', {
+                    count: hiddenItemCount,
+                  })}
+            </Text>
+          </Button>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+function AllocationSummary({
+  allocations,
+}: {
+  allocations: Array<{
+    accountId: string;
+    accountName: string;
+    amount: number;
+  }>;
+}) {
+  return (
+    <CompactBreakdownSummary
+      items={allocations.map(allocation => ({
+        id: allocation.accountId,
+        label: allocation.accountName,
+        amount: allocation.amount,
+      }))}
+      emptyLabel="Unassigned"
+      textColor={theme.pageText}
+      subduedColor={theme.pageTextSubdued}
+      trackColor={theme.tableBorder}
+      separatorColor={theme.tableBackground}
+    />
+  );
+}
+
+function AllocatedCategoriesSummary({
+  allocations,
+  textColor,
+  subduedColor,
+  trackColor,
+  separatorColor,
+}: {
+  allocations: Array<{
+    categoryId: string;
+    categoryName: string;
+    amount: number;
+  }>;
+  textColor: string;
+  subduedColor: string;
+  trackColor: string;
+  separatorColor: string;
+}) {
+  return (
+    <CompactBreakdownSummary
+      items={allocations.map(allocation => ({
+        id: allocation.categoryId,
+        label: allocation.categoryName,
+        amount: allocation.amount,
+      }))}
+      emptyLabel="Unassigned"
+      textColor={textColor}
+      subduedColor={subduedColor}
+      trackColor={trackColor}
+      separatorColor={separatorColor}
+    />
+  );
+}
+
 function getAllocationSliderMax({
   currentValue,
   categoryRemainder,
@@ -1803,11 +2018,6 @@ export function FundsLocation() {
             <tbody>
               {sortedAccountRows.map(accountRow => {
                 const isSelected = selectedAccountId === accountRow.account.id;
-                const visibleCategoryAllocations =
-                  accountRow.categoryAllocations.slice(0, 3);
-                const hiddenCategoryCount =
-                  accountRow.categoryAllocations.length -
-                  visibleCategoryAllocations.length;
                 const rowBackground = isSelected
                   ? theme.tableRowBackgroundHighlight
                   : theme.tableBackground;
@@ -1891,49 +2101,19 @@ export function FundsLocation() {
                         verticalAlign: 'top',
                       }}
                     >
-                      {visibleCategoryAllocations.length > 0 ? (
-                        <View style={{ gap: 4 }}>
-                          {visibleCategoryAllocations.map(allocation => (
-                            <View
-                              key={`${accountRow.account.id}-${allocation.categoryId}`}
-                              style={{
-                                gap: 8,
-                                flexDirection: 'row',
-                                justifyContent: 'space-between',
-                              }}
-                            >
-                              <Text>{allocation.categoryName}</Text>
-                              <FinancialText style={styles.tnum}>
-                                {format(allocation.amount, 'financial')}
-                              </FinancialText>
-                            </View>
-                          ))}
-                          {hiddenCategoryCount > 0 ? (
-                            <Text
-                              style={{
-                                ...styles.smallText,
-                                color: isSelected
-                                  ? rowTextColor
-                                  : theme.pageTextSubdued,
-                              }}
-                            >
-                              {t('+{{count}} more', {
-                                count: hiddenCategoryCount,
-                              })}
-                            </Text>
-                          ) : null}
-                        </View>
-                      ) : (
-                        <Text
-                          style={{
-                            color: isSelected
-                              ? rowTextColor
-                              : theme.pageTextSubdued,
-                          }}
-                        >
-                          <Trans>Unassigned</Trans>
-                        </Text>
-                      )}
+                      <AllocatedCategoriesSummary
+                        allocations={accountRow.categoryAllocations}
+                        textColor={rowTextColor}
+                        subduedColor={
+                          isSelected ? rowTextColor : theme.pageTextSubdued
+                        }
+                        trackColor={
+                          isSelected
+                            ? 'rgba(255, 255, 255, 0.2)'
+                            : theme.tableBorder
+                        }
+                        separatorColor={rowBackground}
+                      />
                     </td>
                   </tr>
                 );
@@ -2294,9 +2474,6 @@ export function FundsLocation() {
             <tbody>
               {filteredSortedCategoryRows.map(row => {
                 const { category, summaryAllocations, accountAmounts } = row;
-                const visibleSummaryAllocations = summaryAllocations.slice(0, 3);
-                const hiddenSummaryCount =
-                  summaryAllocations.length - visibleSummaryAllocations.length;
 
                 return (
                   <tr key={category.id}>
@@ -2354,45 +2531,7 @@ export function FundsLocation() {
                             verticalAlign: 'top',
                           }}
                         >
-                          {visibleSummaryAllocations.length > 0 ? (
-                            <View style={{ gap: 4 }}>
-                              {visibleSummaryAllocations.map(allocation => (
-                                <View
-                                  key={`${category.id}-${allocation.accountId}`}
-                                  style={{
-                                    gap: 8,
-                                    flexDirection: 'row',
-                                    justifyContent: 'space-between',
-                                  }}
-                                >
-                                  <Text>{allocation.accountName}</Text>
-                                  <FinancialText style={styles.tnum}>
-                                    {format(allocation.amount, 'financial')}
-                                  </FinancialText>
-                                </View>
-                              ))}
-                              {hiddenSummaryCount > 0 ? (
-                                <Text
-                                  style={{
-                                    ...styles.smallText,
-                                    color: theme.pageTextSubdued,
-                                  }}
-                                >
-                                  {t('+{{count}} more', {
-                                    count: hiddenSummaryCount,
-                                  })}
-                                </Text>
-                              ) : null}
-                            </View>
-                          ) : (
-                            <Text
-                              style={{
-                                color: theme.pageTextSubdued,
-                              }}
-                            >
-                              <Trans>Unassigned</Trans>
-                            </Text>
-                          )}
+                          <AllocationSummary allocations={summaryAllocations} />
                         </td>
                         <td
                           style={{
@@ -2881,12 +3020,6 @@ export function FundsLocation() {
         <Modal
           name="funds-location-category-allocation"
           onClose={closeCategoryDialog}
-          containerProps={{
-            style: {
-              minWidth: 'min(960px, 95vw)',
-              maxWidth: 'min(960px, 95vw)',
-            },
-          }}
         >
           <ModalHeader
             title={selectedDialogCategory.name}
@@ -2929,7 +3062,6 @@ export function FundsLocation() {
             <div
               style={{
                 overflowY: 'auto',
-                maxHeight: 'min(60vh, 640px)',
                 border: `1px solid ${theme.tableBorder}`,
                 backgroundColor: theme.tableBackground,
               }}

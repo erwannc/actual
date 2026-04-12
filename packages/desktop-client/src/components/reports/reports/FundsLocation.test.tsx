@@ -252,6 +252,35 @@ function useHighAccountFixture() {
   };
 }
 
+function useDenseAccountBreakdownFixture() {
+  currentAccounts = BASE_ACCOUNTS;
+  currentCategories = [
+    ...BASE_CATEGORIES,
+    {
+      id: 'medical',
+      name: 'Medical',
+      group_id: 'true-expenses',
+      group_name: 'True Expenses',
+      balance: 2000,
+    },
+  ];
+  monthAccountOverrides = {};
+  monthCategoryOverrides = {};
+  savedAllocations = {
+    '2019-02': [
+      { categoryId: 'food', accountId: 'checking', amount: 3000 },
+      { categoryId: 'utilities', accountId: 'checking', amount: 1200 },
+      { categoryId: 'vacation', accountId: 'checking', amount: 900 },
+      { categoryId: 'medical', accountId: 'checking', amount: 500 },
+    ],
+    '2019-03': [],
+  };
+  savedSnapshots = {
+    '2019-02': true,
+    '2019-03': false,
+  };
+}
+
 function useFilteredCarryOverFixture() {
   useBaseFixture();
   monthCategoryOverrides = {
@@ -451,6 +480,39 @@ describe('FundsLocation', () => {
     expect(within(detailPanel).getByText('Utilities')).toBeInTheDocument();
     expect(within(detailPanel).getAllByText('1200').length).toBeGreaterThan(0);
     expect(within(detailPanel).queryByText('Food')).not.toBeInTheDocument();
+  });
+
+  test('allocated categories summary can expand hidden categories in account view', async () => {
+    useDenseAccountBreakdownFixture();
+    setupMockServer();
+
+    renderFundsLocation();
+
+    await screen.findByTestId('funds-location-table');
+
+    fireEvent.click(screen.getByRole('button', { name: 'By account' }));
+
+    const accountTable = await screen.findByTestId(
+      'funds-location-account-table',
+    );
+    expect(accountTable).toBeInTheDocument();
+
+    const checkingRow = within(accountTable).getByText('Checking').closest('tr');
+    expect(checkingRow).not.toBeNull();
+
+    expect(within(checkingRow!).getByText('Food')).toBeInTheDocument();
+    expect(within(checkingRow!).getByText('Utilities')).toBeInTheDocument();
+    expect(within(checkingRow!).getByText('Vacation')).toBeInTheDocument();
+    expect(within(checkingRow!).queryByText('Medical')).not.toBeInTheDocument();
+
+    fireEvent.click(
+      within(checkingRow!).getByRole('button', { name: '+1 more' }),
+    );
+
+    expect(within(checkingRow!).getByText('Medical')).toBeInTheDocument();
+    expect(
+      within(checkingRow!).getByRole('button', { name: 'Show less' }),
+    ).toBeInTheDocument();
   });
 
   test('sorts grid-mode report rows by account column', async () => {
@@ -690,6 +752,26 @@ describe('FundsLocation', () => {
     expect(within(foodRow).getByText('+1 more')).toBeInTheDocument();
     expect(
       within(foodRow).getByRole('button', { name: 'Edit accounts' }),
+    ).toBeInTheDocument();
+  });
+
+  test('compact allocation summary can expand hidden allocations', async () => {
+    useHighAccountFixture();
+    setupMockServer();
+
+    renderFundsLocation();
+
+    await screen.findByRole('columnheader', { name: 'Allocation summary' });
+
+    const foodRow = getCategoryRow('Food');
+
+    expect(within(foodRow).queryByText('Account 04')).not.toBeInTheDocument();
+
+    fireEvent.click(within(foodRow).getByRole('button', { name: '+1 more' }));
+
+    expect(within(foodRow).getByText('Account 04')).toBeInTheDocument();
+    expect(
+      within(foodRow).getByRole('button', { name: 'Show less' }),
     ).toBeInTheDocument();
   });
 
