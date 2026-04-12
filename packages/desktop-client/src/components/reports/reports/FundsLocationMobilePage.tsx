@@ -132,6 +132,113 @@ function MobileSummaryMetric({
   );
 }
 
+function getUsageColor({
+  allocated,
+  remainder,
+  textColor,
+}: {
+  allocated: number;
+  remainder: number;
+  textColor: string;
+}) {
+  if (remainder < 0) {
+    return theme.reportsRed;
+  }
+
+  if (allocated === 0) {
+    return theme.reportsGray;
+  }
+
+  if (remainder === 0) {
+    return theme.reportsGreen;
+  }
+
+  return theme.reportsBlue;
+}
+
+function MobileUsageSummary({
+  allocated,
+  balance,
+  remainder,
+  trackColor = theme.tableBorder,
+  subduedColor = theme.pageTextSubdued,
+  textColor = theme.pageText,
+}: {
+  allocated: number;
+  balance: number;
+  remainder: number;
+  trackColor?: string;
+  subduedColor?: string;
+  textColor?: string;
+}) {
+  const format = useFormat();
+  const usageColor = getUsageColor({ allocated, remainder, textColor });
+  const usageRatio =
+    balance > 0 ? Math.max(0, Math.min(1, allocated / balance)) : 0;
+
+  return (
+    <View style={{ gap: 8 }}>
+      <Text style={{ ...styles.smallText, color: theme.pageTextSubdued }}>
+        <Trans>Usage</Trans>
+      </Text>
+
+      <View
+        style={{
+          gap: 4,
+          flexDirection: 'row',
+          alignItems: 'baseline',
+          ...styles.tnum,
+        }}
+      >
+        <FinancialText>{format(allocated, 'financial')}</FinancialText>
+        <Text style={{ color: subduedColor }}>/</Text>
+        <FinancialText style={{ color: subduedColor }}>
+          {format(balance, 'financial')}
+        </FinancialText>
+      </View>
+
+      <div
+        aria-hidden="true"
+        style={{
+          height: 8,
+          width: '100%',
+          overflow: 'hidden',
+          borderRadius: 999,
+          backgroundColor: trackColor,
+        }}
+      >
+        <div
+          style={{
+            height: '100%',
+            width: `${usageRatio * 100}%`,
+            borderRadius: 999,
+            backgroundColor: usageColor,
+          }}
+        />
+      </div>
+
+      <Text
+        style={{
+          ...styles.smallText,
+          color: usageColor,
+        }}
+      >
+        {remainder === 0 ? (
+          <Trans>Fully allocated</Trans>
+        ) : remainder > 0 ? (
+          <Trans>
+            <FinancialText>{format(remainder, 'financial')}</FinancialText> left
+          </Trans>
+        ) : (
+          <Trans>
+            Over by <FinancialText>{format(Math.abs(remainder), 'financial')}</FinancialText>
+          </Trans>
+        )}
+      </Text>
+    </View>
+  );
+}
+
 function MobileCategoryCard({
   row,
   onOpenCategory,
@@ -155,14 +262,33 @@ function MobileCategoryCard({
       }}
     >
       <View style={{ gap: 10 }}>
-        <View style={{ gap: 2 }}>
-          <Text style={{ ...styles.smallText, color: theme.pageTextSubdued }}>
-            {category.group_name}
-          </Text>
-          <Text style={{ ...styles.mediumText, fontWeight: 600 }}>
-            {category.name}
-          </Text>
+        <View
+          style={{
+            gap: 12,
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'baseline',
+          }}
+        >
+          <View style={{ gap: 2, flex: 1 }}>
+            <Text style={{ ...styles.smallText, color: theme.pageTextSubdued }}>
+              {category.group_name}
+            </Text>
+            <Text style={{ ...styles.mediumText, fontWeight: 600 }}>
+              {category.name}
+            </Text>
+          </View>
+
+          <FinancialText style={styles.tnum}>
+            {format(category.balance, 'financial')}
+          </FinancialText>
         </View>
+
+        <MobileUsageSummary
+          allocated={category.allocated}
+          balance={category.balance}
+          remainder={category.remainder}
+        />
 
         <View
           style={{
@@ -171,40 +297,6 @@ function MobileCategoryCard({
             gap: 10,
           }}
         >
-          <View style={{ gap: 2 }}>
-            <Text style={{ ...styles.smallText, color: theme.pageTextSubdued }}>
-              <Trans>Balance</Trans>
-            </Text>
-            <FinancialText style={styles.tnum}>
-              {format(category.balance, 'financial')}
-            </FinancialText>
-          </View>
-          <View style={{ gap: 2 }}>
-            <Text style={{ ...styles.smallText, color: theme.pageTextSubdued }}>
-              <Trans>Allocated</Trans>
-            </Text>
-            <FinancialText style={styles.tnum}>
-              {format(category.allocated, 'financial')}
-            </FinancialText>
-          </View>
-          <View style={{ gap: 2 }}>
-            <Text style={{ ...styles.smallText, color: theme.pageTextSubdued }}>
-              <Trans>Remainder</Trans>
-            </Text>
-            <FinancialText
-              style={{
-                ...styles.tnum,
-                color:
-                  category.remainder === 0
-                    ? theme.pageText
-                    : category.remainder > 0
-                      ? theme.noticeText
-                      : theme.errorText,
-              }}
-            >
-              {format(category.remainder, 'financial')}
-            </FinancialText>
-          </View>
           <View style={{ gap: 2 }}>
             <Text style={{ ...styles.smallText, color: theme.pageTextSubdued }}>
               <Trans>Funds location</Trans>
