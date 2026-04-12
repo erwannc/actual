@@ -59,7 +59,6 @@ const STICKY_COLUMNS = [
   'category',
   'balance',
   'allocated',
-  'remainder',
 ] as const;
 const HIGH_ACCOUNT_COUNT_THRESHOLD = 5;
 const ACCOUNT_SEARCH_THRESHOLD = 10;
@@ -227,7 +226,6 @@ function getStickyColumnMinWidth(column: StickyReportColumn) {
       return 100;
     case 'balance':
     case 'allocated':
-    case 'remainder':
       return 103;
     default:
       return 100;
@@ -291,6 +289,93 @@ function SummaryStat({
         {format(value, 'financial')}
       </FinancialText>
     </Block>
+  );
+}
+
+function CompactUsage({
+  allocated,
+  balance,
+  remainder,
+  textColor,
+  subduedColor,
+  trackColor,
+}: {
+  allocated: number;
+  balance: number;
+  remainder: number;
+  textColor: string;
+  subduedColor: string;
+  trackColor: string;
+}) {
+  const format = useFormat();
+  const usageColor =
+    remainder < 0
+      ? theme.reportsRed
+      : allocated === 0
+        ? theme.reportsGray
+        : remainder === 0
+          ? theme.reportsGreen
+          : theme.reportsBlue;
+  const usageRatio =
+    balance > 0 ? Math.max(0, Math.min(1, allocated / balance)) : 0;
+
+  return (
+    <View style={{ gap: 6 }}>
+      <View
+        style={{
+          gap: 4,
+          flexDirection: 'row',
+          alignItems: 'baseline',
+          ...styles.tnum,
+        }}
+      >
+        <FinancialText>{format(allocated, 'financial')}</FinancialText>
+        <Text style={{ color: subduedColor }}>/</Text>
+        <FinancialText style={{ color: subduedColor }}>
+          {format(balance, 'financial')}
+        </FinancialText>
+      </View>
+
+      <div
+        aria-hidden="true"
+        style={{
+          height: 6,
+          width: '100%',
+          overflow: 'hidden',
+          borderRadius: 999,
+          backgroundColor: trackColor,
+        }}
+      >
+        <div
+          style={{
+            height: '100%',
+            width: `${usageRatio * 100}%`,
+            borderRadius: 999,
+            backgroundColor: usageColor,
+          }}
+        />
+      </div>
+
+      <Text
+        style={{
+          ...styles.smallText,
+          color: usageColor,
+        }}
+      >
+        {remainder === 0 ? (
+          <Trans>Fully allocated</Trans>
+        ) : remainder > 0 ? (
+          <Trans>
+            <FinancialText>{format(remainder, 'financial')}</FinancialText> left
+          </Trans>
+        ) : (
+          <Trans>
+            Over by{' '}
+            <FinancialText>{format(Math.abs(remainder), 'financial')}</FinancialText>
+          </Trans>
+        )}
+      </Text>
+    </View>
   );
 }
 
@@ -1538,7 +1623,7 @@ export function FundsLocation() {
                 <th
                   style={{
                     padding: 12,
-                    textAlign: 'right',
+                    textAlign: 'left',
                     borderBottom: `1px solid ${theme.tableBorder}`,
                     position: 'sticky',
                     top: 0,
@@ -1546,24 +1631,7 @@ export function FundsLocation() {
                     backgroundColor: theme.tableBackground,
                   }}
                 >
-                  {renderReportSortHeader(t('Allocated'), 'allocated', {
-                    align: 'right',
-                  })}
-                </th>
-                <th
-                  style={{
-                    padding: 12,
-                    textAlign: 'right',
-                    borderBottom: `1px solid ${theme.tableBorder}`,
-                    position: 'sticky',
-                    top: 0,
-                    zIndex: 2,
-                    backgroundColor: theme.tableBackground,
-                  }}
-                >
-                  {renderReportSortHeader(t('Remainder'), 'remainder', {
-                    align: 'right',
-                  })}
+                  {renderReportSortHeader(t('Usage'), 'allocated')}
                 </th>
                 <th
                   style={{
@@ -1644,33 +1712,26 @@ export function FundsLocation() {
                     <td
                       style={{
                         padding: 12,
-                        textAlign: 'right',
                         borderBottom: `1px solid ${theme.tableBorder}`,
                         backgroundColor: rowBackground,
                         color: rowTextColor,
-                        ...styles.tnum,
+                        verticalAlign: 'top',
                       }}
                     >
-                      <FinancialText>
-                        {format(accountRow.account.allocated, 'financial')}
-                      </FinancialText>
-                    </td>
-                    <td
-                      style={{
-                        padding: 12,
-                        textAlign: 'right',
-                        borderBottom: `1px solid ${theme.tableBorder}`,
-                        backgroundColor: rowBackground,
-                        color:
-                          accountRow.account.remainder === 0
-                            ? rowTextColor
-                            : theme.noticeText,
-                        ...styles.tnum,
-                      }}
-                    >
-                      <FinancialText>
-                        {format(accountRow.account.remainder, 'financial')}
-                      </FinancialText>
+                      <CompactUsage
+                        allocated={accountRow.account.allocated}
+                        balance={accountRow.account.balance}
+                        remainder={accountRow.account.remainder}
+                        textColor={rowTextColor}
+                        subduedColor={
+                          isSelected ? rowTextColor : theme.pageTextSubdued
+                        }
+                        trackColor={
+                          isSelected
+                            ? 'rgba(255, 255, 255, 0.2)'
+                            : theme.tableBorder
+                        }
+                      />
                     </td>
                     <td
                       style={{
@@ -2014,7 +2075,7 @@ export function FundsLocation() {
                   style={{
                     minWidth: getStickyColumnMinWidth('allocated'),
                     padding: 12,
-                    textAlign: 'right',
+                    textAlign: 'left',
                     borderBottom: `1px solid ${theme.tableBorder}`,
                     position: 'sticky',
                     top: 0,
@@ -2022,25 +2083,7 @@ export function FundsLocation() {
                     backgroundColor: theme.tableBackground,
                   }}
                 >
-                  {renderReportSortHeader(t('Allocated'), 'allocated', {
-                    align: 'right',
-                  })}
-                </th>
-                <th
-                  style={{
-                    minWidth: getStickyColumnMinWidth('remainder'),
-                    padding: 12,
-                    textAlign: 'right',
-                    borderBottom: `1px solid ${theme.tableBorder}`,
-                    position: 'sticky',
-                    top: 0,
-                    zIndex: 2,
-                    backgroundColor: theme.tableBackground,
-                  }}
-                >
-                  {renderReportSortHeader(t('Remainder'), 'remainder', {
-                    align: 'right',
-                  })}
+                  {renderReportSortHeader(t('Usage'), 'allocated')}
                 </th>
                 {isHighAccountCount ? (
                   <>
@@ -2140,35 +2183,18 @@ export function FundsLocation() {
                     <td
                       style={{
                         padding: 12,
-                        textAlign: 'right',
                         borderBottom: `1px solid ${theme.tableBorder}`,
-                        color: category.isOverallocated
-                          ? theme.errorText
-                          : theme.pageText,
-                        ...styles.tnum,
+                        verticalAlign: 'top',
                       }}
                     >
-                      <FinancialText>
-                        {format(category.allocated, 'financial')}
-                      </FinancialText>
-                    </td>
-                    <td
-                      style={{
-                        padding: 12,
-                        textAlign: 'right',
-                        borderBottom: `1px solid ${theme.tableBorder}`,
-                        color:
-                          category.remainder === 0
-                            ? theme.pageText
-                            : category.remainder > 0
-                              ? theme.noticeText
-                              : theme.errorText,
-                        ...styles.tnum,
-                      }}
-                    >
-                      <FinancialText>
-                        {format(category.remainder, 'financial')}
-                      </FinancialText>
+                      <CompactUsage
+                        allocated={category.allocated}
+                        balance={category.balance}
+                        remainder={category.remainder}
+                        textColor={theme.pageText}
+                        subduedColor={theme.pageTextSubdued}
+                        trackColor={theme.tableBorder}
+                      />
                     </td>
                     {isHighAccountCount ? (
                       <>
@@ -2306,30 +2332,18 @@ export function FundsLocation() {
                 <td
                   style={{
                     padding: 12,
-                    textAlign: 'right',
                     borderTop: `1px solid ${theme.tableBorder}`,
-                    ...styles.tnum,
+                    verticalAlign: 'top',
                   }}
                 >
-                  <FinancialText>
-                    {format(displayData.totals.accountAllocated, 'financial')}
-                  </FinancialText>
-                </td>
-                <td
-                  style={{
-                    padding: 12,
-                    textAlign: 'right',
-                    borderTop: `1px solid ${theme.tableBorder}`,
-                    color:
-                      displayData.totals.accountRemainder === 0
-                        ? theme.pageText
-                        : theme.noticeText,
-                    ...styles.tnum,
-                  }}
-                >
-                  <FinancialText>
-                    {format(displayData.totals.accountRemainder, 'financial')}
-                  </FinancialText>
+                  <CompactUsage
+                    allocated={displayData.totals.accountAllocated}
+                    balance={displayData.totals.accountBalance}
+                    remainder={displayData.totals.accountRemainder}
+                    textColor={theme.pageText}
+                    subduedColor={theme.pageTextSubdued}
+                    trackColor={theme.tableBorder}
+                  />
                 </td>
                 {isHighAccountCount ? (
                   <>
