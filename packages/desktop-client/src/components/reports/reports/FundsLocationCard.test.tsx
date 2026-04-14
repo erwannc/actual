@@ -2,17 +2,20 @@ import type { ReactNode } from 'react';
 
 import { render, screen } from '@testing-library/react';
 
-import { initServer } from 'loot-core/platform/client/connection';
-import type { FundsLocationMonthEntity } from 'loot-core/types/models';
+import { initServer } from '@actual-app/core/platform/client/connection';
+import type { FundsLocationMonthEntity } from '@actual-app/core/types/models';
 
 import { FundsLocationCard } from './FundsLocationCard';
 
-import type { UseFormatResult } from '@desktop-client/hooks/useFormat';
-import { createTestQueryClient, TestProviders } from '@desktop-client/mocks';
+import type { UseFormatResult } from '#hooks/useFormat';
+import { createTestQueryClient, TestProviders } from '#mocks';
 
-vi.mock('loot-core/platform/client/connection');
-vi.mock('loot-core/shared/months', async () => {
-  const actual = await vi.importActual('loot-core/shared/months');
+vi.mock(
+  '@actual-app/core/platform/client/connection',
+  () => import('../../../mocks/connection'),
+);
+vi.mock('@actual-app/core/shared/months', async () => {
+  const actual = await vi.importActual('@actual-app/core/shared/months');
 
   return {
     ...actual,
@@ -20,13 +23,13 @@ vi.mock('loot-core/shared/months', async () => {
     format: () => 'February 2019',
   };
 });
-vi.mock('@desktop-client/hooks/useNavigate', () => ({
+vi.mock('#hooks/useNavigate', () => ({
   useNavigate: () => vi.fn(),
 }));
-vi.mock('@desktop-client/hooks/useIsInViewport', () => ({
+vi.mock('#hooks/useIsInViewport', () => ({
   useIsInViewport: () => true,
 }));
-vi.mock('@desktop-client/hooks/useFormat', () => ({
+vi.mock('#hooks/useFormat', () => ({
   useFormat: () => {
     return Object.assign(
       (value: unknown) => {
@@ -62,7 +65,7 @@ vi.mock('@desktop-client/hooks/useFormat', () => ({
   },
 }));
 vi.mock(
-  '@desktop-client/components/reports/useDashboardWidgetCopyMenu',
+  '#components/reports/useDashboardWidgetCopyMenu',
   () => ({
     useDashboardWidgetCopyMenu: () => ({
       menuItems: [],
@@ -70,7 +73,7 @@ vi.mock(
     }),
   }),
 );
-vi.mock('@desktop-client/components/reports/ReportCardName', () => ({
+vi.mock('#components/reports/ReportCardName', () => ({
   ReportCardName: ({ name }: { name: ReactNode }) => <div>{name}</div>,
 }));
 

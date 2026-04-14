@@ -15,38 +15,38 @@ import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { send } from 'loot-core/platform/client/connection';
+import { send } from '@actual-app/core/platform/client/connection';
 import {
   deriveFundsLocationData,
   getFundsLocationAllocationKey,
-} from 'loot-core/shared/funds-location';
-import * as monthUtils from 'loot-core/shared/months';
+} from '@actual-app/core/shared/funds-location';
+import * as monthUtils from '@actual-app/core/shared/months';
 import type {
   FundsLocationAllocationInput,
   FundsLocationMonthEntity,
-} from 'loot-core/types/models';
+} from '@actual-app/core/types/models';
 
-import { MonthPicker } from '@desktop-client/components/budget/MonthPicker';
+import { MonthPicker } from '#components/budget/MonthPicker';
 import {
   Modal,
   ModalButtons,
   ModalCloseButton,
   ModalHeader,
-} from '@desktop-client/components/common/Modal';
-import { Search } from '@desktop-client/components/common/Search';
-import { FinancialText } from '@desktop-client/components/FinancialText';
-import { MobileBackButton } from '@desktop-client/components/mobile/MobileBackButton';
+} from '#components/common/Modal';
+import { Search } from '#components/common/Search';
+import { FinancialText } from '#components/FinancialText';
+import { MobileBackButton } from '#components/mobile/MobileBackButton';
 import {
   MobilePageHeader,
   Page,
   PageHeader,
-} from '@desktop-client/components/Page';
-import { LoadingIndicator } from '@desktop-client/components/reports/LoadingIndicator';
-import { useFormat } from '@desktop-client/hooks/useFormat';
-import { useNavigate } from '@desktop-client/hooks/useNavigate';
-import { addNotification } from '@desktop-client/notifications/notificationsSlice';
-import { useDispatch } from '@desktop-client/redux';
-import { fundsLocationQueries } from '@desktop-client/reports';
+} from '#components/Page';
+import { LoadingIndicator } from '#components/reports/LoadingIndicator';
+import { useFormat } from '#hooks/useFormat';
+import { useNavigate } from '#hooks/useNavigate';
+import { addNotification } from '#notifications/notificationsSlice';
+import { useDispatch } from '#redux';
+import { fundsLocationQueries } from '#reports';
 
 import { AllocationSlider } from './FundsLocationAllocationSlider';
 import { MobileFundsLocationPage } from './FundsLocationMobilePage';

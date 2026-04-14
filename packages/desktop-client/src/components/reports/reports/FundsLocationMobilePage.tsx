@@ -8,15 +8,15 @@ import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 
-import { MonthPicker } from '@desktop-client/components/budget/MonthPicker';
+import { MonthPicker } from '#components/budget/MonthPicker';
 import {
   Modal,
   ModalCloseButton,
   ModalHeader,
-} from '@desktop-client/components/common/Modal';
-import { Search } from '@desktop-client/components/common/Search';
-import { FinancialText } from '@desktop-client/components/FinancialText';
-import { useFormat } from '@desktop-client/hooks/useFormat';
+} from '#components/common/Modal';
+import { Search } from '#components/common/Search';
+import { FinancialText } from '#components/FinancialText';
+import { useFormat } from '#hooks/useFormat';
 
 import { AllocationSlider } from './FundsLocationAllocationSlider';
 

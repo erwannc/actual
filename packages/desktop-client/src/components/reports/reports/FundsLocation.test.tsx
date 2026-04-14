@@ -8,21 +8,24 @@ import {
   within,
 } from '@testing-library/react';
 
-import { initServer } from 'loot-core/platform/client/connection';
-import { deriveFundsLocationData } from 'loot-core/shared/funds-location';
+import { initServer } from '@actual-app/core/platform/client/connection';
+import { deriveFundsLocationData } from '@actual-app/core/shared/funds-location';
 import type {
   FundsLocationAllocationInput,
   FundsLocationMonthEntity,
-} from 'loot-core/types/models';
+} from '@actual-app/core/types/models';
 
 import { FundsLocation } from './FundsLocation';
 
-import type { UseFormatResult } from '@desktop-client/hooks/useFormat';
-import { createTestQueryClient, TestProviders } from '@desktop-client/mocks';
+import type { UseFormatResult } from '#hooks/useFormat';
+import { createTestQueryClient, TestProviders } from '#mocks';
 
-vi.mock('loot-core/platform/client/connection');
-vi.mock('loot-core/shared/months', async () => {
-  const actual = await vi.importActual('loot-core/shared/months');
+vi.mock(
+  '@actual-app/core/platform/client/connection',
+  () => import('../../../mocks/connection'),
+);
+vi.mock('@actual-app/core/shared/months', async () => {
+  const actual = await vi.importActual('@actual-app/core/shared/months');
 
   return {
     ...actual,
@@ -32,10 +35,10 @@ vi.mock('loot-core/shared/months', async () => {
 vi.mock('@actual-app/components/hooks/useResponsive', () => ({
   useResponsive: () => ({ isNarrowWidth: false }),
 }));
-vi.mock('@desktop-client/hooks/useNavigate', () => ({
+vi.mock('#hooks/useNavigate', () => ({
   useNavigate: () => vi.fn(),
 }));
-vi.mock('@desktop-client/hooks/useFormat', () => ({
+vi.mock('#hooks/useFormat', () => ({
   useFormat: () => {
     return Object.assign(
       (value: unknown) => {
@@ -70,7 +73,7 @@ vi.mock('@desktop-client/hooks/useFormat', () => ({
     ) satisfies UseFormatResult;
   },
 }));
-vi.mock('@desktop-client/components/budget/MonthPicker', () => ({
+vi.mock('#components/budget/MonthPicker', () => ({
   MonthPicker: ({
     startMonth,
     monthBounds,
@@ -91,7 +94,7 @@ vi.mock('@desktop-client/components/budget/MonthPicker', () => ({
     </div>
   ),
 }));
-vi.mock('@desktop-client/components/common/Modal', () => ({
+vi.mock('#components/common/Modal', () => ({
   Modal: ({ name, children }: { name: string; children: ReactNode }) => (
     <div data-testid={`${name}-modal`}>{children}</div>
   ),
@@ -125,7 +128,7 @@ vi.mock('@desktop-client/components/common/Modal', () => ({
     </button>
   ),
 }));
-vi.mock('@desktop-client/components/common/Search', () => ({
+vi.mock('#components/common/Search', () => ({
   Search: ({
     value,
     onChange,

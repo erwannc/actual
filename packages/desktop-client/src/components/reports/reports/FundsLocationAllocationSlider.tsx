@@ -7,9 +7,9 @@ import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 
-import { FinancialText } from '@desktop-client/components/FinancialText';
-import { FinancialInput } from '@desktop-client/components/util/FinancialInput';
-import { useFormat } from '@desktop-client/hooks/useFormat';
+import { FinancialText } from '#components/FinancialText';
+import { FinancialInput } from '#components/util/FinancialInput';
+import { useFormat } from '#hooks/useFormat';
 
 type AllocationSliderProps = {
   label: string;

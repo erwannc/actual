@@ -8,17 +8,17 @@ import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 import { useQuery } from '@tanstack/react-query';
 
-import * as monthUtils from 'loot-core/shared/months';
-import type { FundsLocationWidget } from 'loot-core/types/models';
+import * as monthUtils from '@actual-app/core/shared/months';
+import type { FundsLocationWidget } from '@actual-app/core/types/models';
 
-import { FinancialText } from '@desktop-client/components/FinancialText';
-import { LoadingIndicator } from '@desktop-client/components/reports/LoadingIndicator';
-import { ReportCard } from '@desktop-client/components/reports/ReportCard';
-import { ReportCardName } from '@desktop-client/components/reports/ReportCardName';
-import { useDashboardWidgetCopyMenu } from '@desktop-client/components/reports/useDashboardWidgetCopyMenu';
-import { useFormat } from '@desktop-client/hooks/useFormat';
-import { useLocale } from '@desktop-client/hooks/useLocale';
-import { fundsLocationQueries } from '@desktop-client/reports';
+import { FinancialText } from '#components/FinancialText';
+import { LoadingIndicator } from '#components/reports/LoadingIndicator';
+import { ReportCard } from '#components/reports/ReportCard';
+import { ReportCardName } from '#components/reports/ReportCardName';
+import { useDashboardWidgetCopyMenu } from '#components/reports/useDashboardWidgetCopyMenu';
+import { useFormat } from '#hooks/useFormat';
+import { useLocale } from '#hooks/useLocale';
+import { fundsLocationQueries } from '#reports';
 
 type FundsLocationCardProps = {
   widgetId: string;
