@@ -229,5 +229,6 @@ export type SankeyWidget = AbstractWidget<
     mode?: 'budgeted' | 'spent';
     topNcategories?: number;
     categorySort?: 'per-group' | 'global' | 'budget-order';
+    showPercentages?: boolean;
   } | null
 >;
